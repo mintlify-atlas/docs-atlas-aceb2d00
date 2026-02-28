@@ -90,6 +90,12 @@
             ]
           },
           {
+            "group": "Plugin Interface",
+            "pages": [
+              "api/geyser-plugin"
+            ]
+          },
+          {
             "group": "Core Components",
             "pages": [
               "api/accounts-db",

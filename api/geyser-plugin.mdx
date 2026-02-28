@@ -1,0 +1,225 @@
+---
+title: Geyser Plugin Interface
+description: Plugin interface for streaming account and transaction data from Agave validator
+---
+
+The Geyser plugin interface provides a way to build custom plugins that receive real-time notifications about accounts, transactions, blocks, and slots as they are processed by the Agave validator.
+
+## Overview
+
+Geyser plugins enable you to:
+- Stream account updates in real-time
+- Capture transaction execution details
+- Monitor block production
+- Track slot progression
+- Build custom indexers and data pipelines
+
+Plugins are dynamically loaded libraries that implement the `GeyserPlugin` trait and receive callbacks from the validator runtime.
+
+## Plugin Interface
+
+### Account Updates
+
+Plugins receive notifications when accounts are modified:
+
+```rust
+pub struct ReplicaAccountInfoV3<'a> {
+    /// The Pubkey for the account
+    pub pubkey: &'a [u8],
+    
+    /// The lamports for the account
+    pub lamports: u64,
+    
+    /// The Pubkey of the owner program account
+    pub owner: &'a [u8],
+    
+    /// This account's data contains a loaded program
+    pub executable: bool,
+    
+    /// The epoch at which this account will next owe rent
+    pub rent_epoch: u64,
+    
+    /// The data held in this account
+    pub data: &'a [u8],
+    
+    /// Monotonically increasing write version
+    pub write_version: u64,
+    
+    /// Transaction that caused this update
+    pub txn: Option<&'a SanitizedTransaction>,
+}
+```
+
+### Transaction Notifications
+
+Plugins are notified when transactions are processed with full execution metadata including:
+- Transaction signature
+- Execution status (success/failure)
+- Log messages
+- Account modifications
+- Compute units consumed
+
+### Slot and Block Events
+
+Track validator progress:
+- **Slot notifications** - When slots start and complete
+- **Block metadata** - Block hash, parent slot, rewards
+- **Block commitment** - Finalization status updates
+
+## Configuration
+
+Configure Geyser plugins in your validator startup:
+
+```bash
+agave-validator \
+  --geyser-plugin-config /path/to/plugin-config.json \
+  # ... other validator flags
+```
+
+**Plugin configuration file** (`plugin-config.json`):
+
+```json
+{
+  "libpath": "/path/to/libmy_geyser_plugin.so",
+  "accounts_selector": {
+    "accounts": ["*"],
+    "owners": []
+  },
+  "transaction_selector": {
+    "mentions": []
+  }
+}
+```
+
+## Building a Plugin
+
+To create a Geyser plugin:
+
+1. **Implement the GeyserPlugin trait**
+
+```rust
+use agave_geyser_plugin_interface::geyser_plugin_interface::{
+    GeyserPlugin, 
+    ReplicaAccountInfoVersions,
+    Result as PluginResult
+};
+
+#[derive(Default)]
+pub struct MyGeyserPlugin {
+    // Plugin state
+}
+
+impl GeyserPlugin for MyGeyserPlugin {
+    fn name(&self) -> &'static str {
+        "MyGeyserPlugin"
+    }
+    
+    fn update_account(
+        &self,
+        account: ReplicaAccountInfoVersions,
+        slot: u64,
+        is_startup: bool,
+    ) -> PluginResult<()> {
+        // Handle account update
+        Ok(())
+    }
+    
+    fn notify_transaction(
+        &self,
+        transaction: ReplicaTransactionInfoVersions,
+        slot: u64,
+    ) -> PluginResult<()> {
+        // Handle transaction notification
+        Ok(())
+    }
+    
+    // Implement other required methods...
+}
+```
+
+2. **Export the plugin constructor**
+
+```rust
+#[no_mangle]
+#[allow(improper_ctypes_definitions)]
+pub unsafe extern "C" fn _create_plugin() -> *mut dyn GeyserPlugin {
+    let plugin = MyGeyserPlugin::default();
+    let plugin: Box<dyn GeyserPlugin> = Box::new(plugin);
+    Box::into_raw(plugin)
+}
+```
+
+3. **Build as a dynamic library**
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+```
+
+## Use Cases
+
+### Real-time Indexing
+
+Stream account and transaction data to databases for fast queries:
+- PostgreSQL indexers
+- Elasticsearch clusters
+- Custom data warehouses
+
+### Analytics Pipelines
+
+Feed blockchain data to analytics systems:
+- Stream to Kafka/RabbitMQ
+- Export to data lakes
+- Real-time dashboards
+
+### Custom Business Logic
+
+Build application-specific data pipelines:
+- Token balance tracking
+- NFT marketplace indexing
+- DeFi protocol monitoring
+- Custom alert systems
+
+## Performance Considerations
+
+<Warning>
+Geyser plugins run in the validator process and can impact performance. Keep callbacks fast and non-blocking.
+</Warning>
+
+**Best practices:**
+- Use async processing with queues
+- Batch updates when possible
+- Handle errors gracefully to avoid validator crashes
+- Monitor plugin memory usage
+- Test thoroughly under load
+
+## Plugin Lifecycle
+
+1. **Load** - Validator loads the plugin dynamic library on startup
+2. **Initialize** - `on_load()` called with configuration
+3. **Runtime** - Callbacks invoked as events occur
+4. **Shutdown** - `on_unload()` called when validator stops
+
+## Error Handling
+
+Plugins should handle errors gracefully:
+- Return `PluginResult::Err` for recoverable errors
+- Log errors for debugging
+- Avoid panics that could crash the validator
+
+## Source Reference
+
+The Geyser plugin interface is defined in:
+- `geyser-plugin-interface/src/geyser_plugin_interface.rs`
+- `geyser-plugin-manager/src/` - Plugin loading and management
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="RPC API" icon="plug" href="/api/rpc-overview">
+    Alternative real-time data access via RPC subscriptions
+  </Card>
+  <Card title="WebSocket Methods" icon="signal-stream" href="/api/websocket-methods">
+    Subscribe to account and transaction updates via WebSocket
+  </Card>
+</CardGroup>
