@@ -1,0 +1,408 @@
+---
+title: "Gossip Protocol"
+description: "Cluster communication and peer discovery using CRDS gossip in Agave"
+---
+
+## Overview
+
+The Gossip protocol in Agave implements a distributed, eventually-consistent communication layer that allows validators to share cluster-wide information. It uses a **Cluster Replicated Data Store (CRDS)** with push and pull mechanisms to propagate data efficiently across thousands of nodes without centralized coordination.
+
+## Architecture
+
+### Core Components
+
+**ClusterInfo** (`cluster_info.rs:150-200`): The main gossip coordinator that manages the local CRDS, handles incoming/outgoing messages, and maintains network topology.
+
+**CRDS** (`crds.rs:66-85`): The replicated data store mapping `CrdsValueLabel -> CrdsValue`, supporting partial updates and concurrent access.
+
+**CrdsGossip**: Coordinates push and pull gossip strategies.
+
+**CrdsGossipPull** (`crds_gossip_pull.rs:1-150`): Implements anti-entropy pull requests using bloom filters.
+
+**CrdsGossipPush**: Implements eager push dissemination to a subset of peers.
+
+**ContactInfo** (`contact_info.rs`): Contains node identity and network endpoints (gossip, TVU, TPU, etc.).
+
+### Network Topology
+
+Gossip organizes the network in layers:
+
+- **Layer 0**: Leader nodes
+- **Layer 1**: As many nodes as possible (efficient fan-out)
+- **Layer 2**: Remaining nodes (can fit 2^20 nodes if layer 1 has 2^10)
+
+This layered approach enables efficient message propagation even in large clusters.
+
+## CRDS (Cluster Replicated Data Store)
+
+### Data Model
+
+From `crds.rs:66-85`, the CRDS stores versioned values:
+
+```rust
+pub struct Crds {
+    table: IndexMap<CrdsValueLabel, VersionedCrdsValue>,
+    cursor: Cursor,              // Next insert ordinal
+    shards: CrdsShards,          // Sharded for parallel access
+    nodes: IndexSet<usize>,      // Indices of ContactInfo entries
+    votes: BTreeMap<u64, usize>, // Vote entries by insert order
+    epoch_slots: BTreeMap<u64, usize>,
+    duplicate_shreds: BTreeMap<u64, usize>,
+    records: HashMap<Pubkey, IndexSet<usize>>, // All data per node
+    entries: BTreeMap<u64, usize>,
+    purged: VecDeque<(Hash, u64)>, // Recently purged values
+}
+```
+
+Key characteristics:
+- **Partial Updates**: Each `CrdsValueLabel` maps to one `CrdsValue`
+- **Non-Atomic**: Full record updates are not atomic
+- **Versioned**: Each value has wallclock timestamp and local metadata
+- **Sharded**: `CRDS_SHARDS_BITS = 12` (4096 shards) for parallelism
+
+### CrdsValue Types
+
+CRDS stores various cluster information:
+
+- **ContactInfo**: Node identity and network endpoints
+- **Vote**: Validator vote state
+- **LowestSlot**: Oldest slot a node has available
+- **SnapshotHashes**: Available snapshot information
+- **EpochSlots**: Slots the node has observed
+- **DuplicateShred**: Evidence of slashing conditions
+
+### Merge Strategy
+
+From `crds.rs:187-200`, values are merged using the `overrides` function:
+
+```rust
+fn overrides(value: &CrdsValue, other: &VersionedCrdsValue) -> bool {
+    // ContactInfo uses special override logic
+    if let CrdsData::ContactInfo(value) = value.data()
+        && let CrdsData::ContactInfo(other) = other.value.data()
+        && let Some(out) = value.overrides(other)
+    {
+        return out;
+    }
+    match value.wallclock().cmp(&other.value.wallclock()) {
+        Ordering::Less => false,
+        Ordering::Greater => true,
+        // On tie, compare hashes
+    }
+}
+```
+
+Newer wallclock times win; ties broken by hash comparison.
+
+### Versioned CRDS Values
+
+From `crds.rs:121-132`:
+
+```rust
+pub struct VersionedCrdsValue {
+    ordinal: u64,                // Insert order
+    pub value: CrdsValue,        // Actual data
+    pub(crate) local_timestamp: u64,
+    num_push_recv: Option<u8>,   // Tracking push duplicates
+}
+```
+
+The `num_push_recv` field tracks message origin:
+- `None`: Local message or pull request
+- `Some(0)`: Received via pull response
+- `Some(k)` where k > 0: Received via push with k-1 duplicates
+
+## Gossip Pull Protocol
+
+### Anti-Entropy Mechanism
+
+The pull protocol implements anti-entropy to ensure eventual consistency:
+
+1. **Construct Bloom Filter**: Create bloom filter of local CRDS data
+2. **Send Pull Request**: Ask random peer for data not in bloom filter
+3. **Receive Response**: Peer sends values not matching bloom filter
+4. **Merge Data**: Integrate new values into local CRDS
+
+From `crds_gossip_pull.rs:1-13`:
+
+```
+Basic strategy:
+1. Construct a bloom filter of the local data set
+2. Randomly ask a node on the network for data not in the bloom filter
+
+Bloom filters have a false positive rate. Each request uses a different
+bloom filter with random hash functions for different false positive
+distributions.
+```
+
+### Bloom Filter Configuration
+
+From `crds_gossip_pull.rs:53-57`:
+
+```rust
+const CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS: u64 = 15000;
+const FAILED_INSERTS_RETENTION_MS: u64 = 20_000;
+const FALSE_RATE: f64 = 0.1;  // 10% false positive rate
+const KEYS: f64 = 8.0;        // 8 hash functions
+```
+
+### CrdsFilter
+
+The `CrdsFilter` structure (`crds_gossip_pull.rs:60-83`):
+
+```rust
+pub struct CrdsFilter {
+    pub filter: Bloom<Hash>,
+    mask: u64,        // Mask for filtering subset of data
+    mask_bits: u32,   // Number of mask bits
+}
+```
+
+The mask enables partial CRDS synchronization:
+- Higher mask_bits = smaller subset of data
+- Allows gradual sync of large datasets
+- Computed from ratio of items to max capacity
+
+### Pull Request Flow
+
+From `crds_gossip_pull.rs:67-73`:
+
+```rust
+pub struct PullRequest {
+    pub pubkey: Pubkey,      // Remote node's identity
+    pub addr: SocketAddr,    // Request source address
+    pub wallclock: u64,      // Remote node's wallclock
+    pub filter: CrdsFilter,  // Bloom filter of remote's data
+}
+```
+
+Pull interval: Every 5 gossip rounds (`PULL_REQUEST_PERIOD = 5`)
+
+## Gossip Push Protocol
+
+### Eager Push Dissemination
+
+The push protocol eagerly sends new data to peers:
+
+1. **New Local Value**: Node creates or receives new CRDS value
+2. **Select Peers**: Choose subset of cluster based on stake weight
+3. **Push Message**: Send value to selected peers
+4. **Prune Messages**: Peers can request to be removed from push path
+
+Push messages have bounded size (`PUSH_MESSAGE_MAX_PAYLOAD_SIZE`).
+
+### Push Deduplication
+
+The CRDS tracks push duplicates in `VersionedCrdsValue.num_push_recv`:
+
+- First push: `num_push_recv = Some(1)`
+- Subsequent pushes: Increment counter
+- Metrics track redundant pushes for monitoring
+
+### Stake-Weighted Selection
+
+Peers are selected for push based on stake weight:
+
+- Higher stake nodes more likely to be selected
+- Ensures critical validators receive updates quickly
+- Uses `WeightedShuffle` for stake-proportional randomization
+
+## Cluster Discovery
+
+### Entrypoints
+
+From `cluster_info.rs:156`:
+
+```rust
+pub struct ClusterInfo {
+    pub gossip: CrdsGossip,
+    keypair: ArcSwap<Keypair>,
+    entrypoints: RwLock<Vec<ContactInfo>>,  // Bootstrap nodes
+    my_contact_info: RwLock<ContactInfo>,
+    // ...
+}
+```
+
+Entrypoints are well-known bootstrap nodes:
+- Used for initial cluster discovery
+- Node sends pull requests to entrypoints
+- Learns about other cluster members from responses
+
+### Contact Info Propagation
+
+Each node publishes its `ContactInfo` containing:
+
+- **Pubkey**: Node identity
+- **Gossip Socket**: Where to send gossip messages
+- **TVU Socket**: Transaction Verification Unit endpoint
+- **TVU Forwards**: For forwarding shreds
+- **TPU Socket**: Transaction Processing Unit endpoint
+- **TPU Forwards**: For forwarding transactions
+- **RPC Socket**: JSON RPC endpoint (if enabled)
+- **Wallclock**: Timestamp for versioning
+
+ContactInfo is updated when endpoints change or node restarts.
+
+## Gossip Timing
+
+### Core Intervals
+
+From `cluster_info.rs:97-102`:
+
+```rust
+const GOSSIP_SLEEP_MILLIS: u64 = 100;  // 100ms between gossip rounds
+const PULL_REQUEST_PERIOD: usize = 5;   // Pull every 5 rounds (500ms)
+```
+
+Gossip loop executes every 100ms:
+- Process incoming messages
+- Send push messages (every round)
+- Send pull requests (every 5 rounds)
+- Prune inactive peers
+- Update metrics
+
+### Timeouts and Cleanup
+
+- **CRDS Timeout**: 15 seconds (`CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS`)
+- **Ping Cache TTL**: 1280 seconds (`GOSSIP_PING_CACHE_TTL`)
+- **Failed Inserts**: 20 seconds (`FAILED_INSERTS_RETENTION_MS`)
+
+## Network Layer
+
+### Socket Management
+
+ClusterInfo manages multiple UDP sockets:
+
+- **Gossip Socket**: Primary gossip communication
+- **TVU Sockets**: Multiple sockets for receiving shreds
+  - Minimum: 1 (`MINIMUM_NUM_TVU_RECEIVE_SOCKETS`)
+  - Default: 1 (`DEFAULT_NUM_TVU_RECEIVE_SOCKETS`)
+- **TVU Retransmit**: 12 sockets default (`DEFAULT_NUM_TVU_RETRANSMIT_SOCKETS`)
+
+### Channel Capacity
+
+From `cluster_info.rs:106-121`:
+
+```rust
+const CHANNEL_CONSUME_CAPACITY: usize = 1024;  // Batches per iteration
+const GOSSIP_CHANNEL_CAPACITY: usize = 4096;   // 262k packets (64/batch)
+```
+
+High capacity handles burst traffic without dropping packets.
+
+### Ping/Pong Protocol
+
+Nodes exchange pings to verify liveness:
+
+- **Ping Cache**: 126,976 capacity (`GOSSIP_PING_CACHE_CAPACITY`)
+- **Rate Limiting**: 1280/64 = 20 second delay between pings
+- **Token-based**: Pings contain random tokens, verified in pongs
+
+## Data Propagation
+
+### Push Fanout
+
+Push messages are sent to a calculated subset:
+
+- **Prune Data**: Max 32 nodes per prune message (`MAX_PRUNE_DATA_NODES`)
+- **Payload Limits**: 
+  - Push: `PUSH_MESSAGE_MAX_PAYLOAD_SIZE`
+  - Pull Response: `PULL_RESPONSE_MAX_PAYLOAD_SIZE`
+
+### Pull Response Sizing
+
+Pull responses are sized to fit in packets:
+- Minimum serialized size tracked (`PULL_RESPONSE_MIN_SERIALIZED_SIZE`)
+- Responses split across multiple messages if needed
+- Ensures efficient network utilization
+
+### Duplicate Shred Handling
+
+Duplicate shreds (slashing evidence) have special handling:
+
+- Tracked separately in CRDS (`duplicate_shreds` BTreeMap)
+- Maximum payload size: `DUPLICATE_SHRED_MAX_PAYLOAD_SIZE`
+- Prioritized propagation for security
+
+## Metrics and Monitoring
+
+### GossipStats
+
+From `cluster_info.rs:160`, comprehensive metrics:
+
+```rust
+pub(crate) stats: GossipStats,
+```
+
+Tracks:
+- Messages sent/received
+- Push/pull counts
+- Duplicate detection
+- Timing information
+- Signature sampling
+
+### CRDS Statistics
+
+From `crds.rs:104-118`:
+
+```rust
+pub(crate) struct CrdsStats {
+    pub(crate) pull: CrdsDataStats,
+    pub(crate) push: CrdsDataStats,
+    pub(crate) num_redundant_pull_responses: u64,
+    pub(crate) num_duplicate_push_messages: u64,
+}
+```
+
+Per-type counters track message counts and failures.
+
+### Signature Sampling
+
+From `crds.rs:60-64`, rare signatures are logged:
+
+```rust
+const SIGNATURE_SAMPLE_LEADING_ZEROS: u32 = 19;
+// Target: 1 signature reported per minute
+// log2(680k messages/min) ≈ 19.375
+```
+
+Helps detect unusual gossip activity patterns.
+
+## Configuration
+
+### Capacity Limits
+
+From `cluster_info.rs:128`:
+
+```rust
+const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
+```
+
+Limits unique pubkeys in CRDS to bound memory usage.
+
+### Contact Info Management
+
+```rust
+const DEFAULT_CONTACT_DEBUG_INTERVAL_MILLIS: u64 = 10_000;
+const DEFAULT_CONTACT_SAVE_INTERVAL_MILLIS: u64 = 60_000;
+```
+
+- Debug: Log contact info every 10 seconds
+- Save: Persist contact info every 60 seconds
+
+## Key Files
+
+- `cluster_info.rs:1-200` - Main ClusterInfo coordination
+- `crds.rs:1-200` - CRDS data store implementation
+- `crds_gossip_pull.rs:1-150` - Pull protocol with bloom filters
+- `crds_gossip_push.rs` - Push protocol implementation
+- `contact_info.rs` - Node contact information
+- `crds_value.rs` - CRDS value types
+- `crds_data.rs` - CRDS data variants
+
+## Related Components
+
+- **ClusterInfoVoteListener**: Monitors votes from gossip
+- **TVU**: Uses gossip for shred reception coordination
+- **RepairService**: Uses cluster info for repair requests
+- **ServeRepair**: Responds to repair requests using cluster topology

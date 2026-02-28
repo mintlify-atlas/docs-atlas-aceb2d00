@@ -1,0 +1,314 @@
+---
+title: "Banking Stage"
+description: "Transaction processing pipeline for leaders and validators in Agave"
+---
+
+## Overview
+
+The Banking Stage is the core transaction processing component in Agave validators. It receives transaction packets from the network, schedules them for execution, processes them against the current bank state, and commits results to the Proof of History (PoH) ledger. The banking stage operates differently depending on whether the node is a leader (producing blocks) or a validator (verifying blocks).
+
+## Architecture
+
+### High-Level Pipeline
+
+The banking stage implements a multi-stage software pipeline:
+
+```
+TPU Packets → Buffer → Scheduler → Execute → Commit → PoH Recorder
+     ↓           ↓          ↓          ↓         ↓
+  Filter    Dedupe   Conflict    Bank     Entry
+                     Detection  Execute  Creation
+```
+
+Key components from `banking_stage.rs:1-100`:
+
+- **VoteWorker**: Handles vote transactions separately for priority processing
+- **Consumer**: Coordinates transaction execution and recording
+- **Committer**: Commits executed transactions to PoH ledger
+- **DecisionMaker**: Determines when to produce blocks (leader) or verify (validator)
+- **QosService**: Quality of Service management and cost tracking
+- **TransactionScheduler**: Schedules transactions respecting account conflicts
+
+### Transaction Flow
+
+1. **Receive and Buffer**: Packets arrive via TPU and are buffered
+2. **Deduplication**: Filter duplicate transactions
+3. **Scheduling**: Schedule non-conflicting transactions for execution
+4. **Execution**: Execute transactions against bank state
+5. **Commitment**: Record successful transactions in PoH ledger
+6. **Forwarding**: Forward unprocessed transactions (validators only)
+
+## Transaction Scheduling
+
+### Scheduler Architecture
+
+Banking stage supports multiple scheduling strategies:
+
+**GreedyScheduler** (`transaction_scheduler/greedy_scheduler.rs`): Simple first-come-first-served scheduling with conflict detection.
+
+**PrioGraphScheduler** (`transaction_scheduler/prio_graph_scheduler.rs`): Priority-based scheduling using transaction fees and dependency graphs.
+
+The scheduler interface is defined in `transaction_scheduler/scheduler.rs:13-52`:
+
+```rust
+pub trait Scheduler<Tx: TransactionWithMeta> {
+    fn schedule<S: StateContainer<Tx>>(
+        &mut self,
+        container: &mut S,
+        budget: u64,
+        relax_intrabatch_account_locks: bool,
+        pre_graph_filter: impl Fn(&[&Tx], &mut [bool]),
+        pre_lock_filter: impl Fn(&TransactionState<Tx>) -> PreLockFilterAction,
+    ) -> Result<SchedulingSummary, SchedulerError>;
+
+    fn receive_completed(
+        &mut self,
+        container: &mut impl StateContainer<Tx>,
+    ) -> Result<(usize, usize), SchedulerError>;
+}
+```
+
+### Conflict Detection
+
+Schedulers detect account conflicts to enable parallel execution:
+
+- **Read-Write Sets**: Extract account read/write sets from transactions
+- **Conflict Graph**: Build dependency graph based on shared accounts
+- **Batch Formation**: Group non-conflicting transactions into batches
+
+Transactions with overlapping writable accounts must execute sequentially.
+
+### Scheduling Summary
+
+From `scheduler.rs:62-80`, scheduling returns detailed metrics:
+
+```rust
+pub struct SchedulingSummary {
+    pub starting_queue_size: usize,
+    pub starting_buffer_size: usize,
+    pub num_scheduled: usize,
+    pub num_unschedulable_conflicts: usize,
+    pub num_unschedulable_threads: usize,
+    pub num_filtered_out: usize,
+    pub filter_time_us: u64,
+}
+```
+
+## Transaction Execution
+
+### Consumer and Execution
+
+The `Consumer` component (`consumer.rs:105-150`) orchestrates execution:
+
+```rust
+pub struct Consumer {
+    committer: Committer,
+    transaction_recorder: TransactionRecorder,
+    qos_service: QosService,
+    log_messages_bytes_limit: Option<usize>,
+}
+```
+
+Execution flow:
+
+1. **Pre-checks**: Validate transaction signatures, check account locks
+2. **Cost Model**: Apply QoS cost limits to prevent block stuffing
+3. **Bank Execution**: Execute transactions via `Bank::load_and_execute_transactions`
+4. **Post-processing**: Collect results, update metrics
+
+Target batch size: **64 transactions** (`TARGET_NUM_TRANSACTIONS_PER_BATCH`)
+
+### Execution Flags
+
+From `consumer.rs:38-52`, execution behavior is controlled by:
+
+```rust
+pub struct ExecutionFlags {
+    pub drop_on_failure: bool,    // Drop failing transactions (no fee charged)
+    pub all_or_nothing: bool,     // Entire batch succeeds or fails together
+}
+```
+
+### Quality of Service (QoS)
+
+The `QosService` (`qos_service.rs`) enforces resource limits:
+
+- **Compute Units**: Track and limit compute budget consumption
+- **Account Limits**: Prevent too many transactions touching same accounts
+- **Block Limits**: Ensure block stays within resource constraints
+- **Cost Tracking**: Monitor costs per account and per block
+
+Throttled transactions are retried or dropped based on configuration.
+
+## Leader vs Validator Roles
+
+### Leader Mode
+
+When acting as leader for a slot:
+
+- **Produce Blocks**: Create new entries and add to ledger
+- **Schedule Aggressively**: Fill blocks up to compute/account limits
+- **Record PoH**: Commit transactions to PoH stream
+- **No Forwarding**: Process all buffered transactions
+
+Leaders aim to maximize block utilization while respecting resource limits.
+
+### Validator Mode
+
+When not the leader:
+
+- **Verify Blocks**: Execute transactions from leader's blocks
+- **Forward Transactions**: Send unprocessed transactions to current leader
+- **Limited Buffering**: Smaller buffer since not producing blocks
+- **Vote Processing**: Prioritize vote transactions for consensus
+
+Validators forward transactions they receive to the current leader via TPU Forward.
+
+## Worker Threads
+
+### ConsumeWorker
+
+From `consume_worker.rs`, multiple workers execute transactions in parallel:
+
+- **Thread Pool**: Configurable worker threads (default: 4, max: 64)
+- **Parallel Execution**: Execute non-conflicting transaction batches concurrently
+- **Thread Affinity**: Track which worker owns which account locks
+
+Worker configuration:
+- `DEFAULT_NUM_WORKERS: 4` (banking_stage.rs:104)
+- `MAX_NUM_WORKERS: 64` (banking_stage.rs:103)
+- Thread placement uses bitmask in `ThreadAwareAccountLocks`
+
+### VoteWorker
+
+Separate worker for vote transactions (`vote_worker.rs`):
+
+- **Priority Processing**: Votes processed before regular transactions
+- **Separate Queue**: Dedicated buffer for vote packets
+- **Fast Path**: Optimized execution for simple vote updates
+
+Votes are critical for consensus and receive preferential treatment.
+
+## Buffering and Flow Control
+
+### Buffer Management
+
+From `banking_stage.rs:106-108`:
+
+```rust
+const TOTAL_BUFFERED_PACKETS: usize = 100_000;
+const SLOT_BOUNDARY_CHECK_PERIOD: Duration = Duration::from_millis(10);
+```
+
+Buffer behavior:
+- **Capacity**: 100k buffered packets maximum
+- **Deduplication**: Drop duplicate transaction signatures
+- **Rebuffering**: Retryable transactions placed back in buffer
+- **Expiration**: Old transactions dropped based on age
+
+### Receive and Buffer
+
+The `TransactionViewReceiveAndBuffer` component:
+
+- Receives packets from TPU channels
+- Converts packets to transaction view objects
+- Applies initial filters (duplicates, expired)
+- Buffers transactions for scheduling
+
+## Committing Transactions
+
+### Committer Component
+
+The `Committer` (`committer.rs:1-150`) finalizes transaction results:
+
+```rust
+pub struct CommitTransactionDetails {
+    pub signature: Signature,
+    pub status: Result<()>,
+    // ... additional fields
+}
+```
+
+Commit process:
+1. **Validate Results**: Ensure transactions executed successfully
+2. **Create Entries**: Bundle transactions into Entry objects
+3. **Record in PoH**: Send entries to PoH recorder
+4. **Update Metrics**: Track commit rates, failures
+
+### PoH Integration
+
+Transactions are recorded in the Proof of History stream:
+
+- **TransactionRecorder**: Interface to PoH recorder
+- **Entry Creation**: Group transactions into entries with PoH hashes
+- **Timing**: Must commit within slot time bounds
+- **Backpressure**: PoH recorder can apply backpressure if falling behind
+
+## Metrics and Monitoring
+
+### BankingStageStats
+
+From `banking_stage.rs:110-128`, comprehensive metrics tracking:
+
+```rust
+pub struct BankingStageStats {
+    dropped_duplicated_packets_count: AtomicUsize,
+    dropped_forward_packets_count: AtomicUsize,
+    current_buffered_packets_count: AtomicUsize,
+    rebuffered_packets_count: AtomicUsize,
+    consumed_buffered_packets_count: AtomicUsize,
+    
+    // Timing metrics
+    consume_buffered_packets_elapsed: AtomicU64,
+    receive_and_buffer_packets_elapsed: AtomicU64,
+    filter_pending_packets_elapsed: AtomicU64,
+    packet_conversion_elapsed: AtomicU64,
+    transaction_processing_elapsed: AtomicU64,
+}
+```
+
+### Leader Slot Metrics
+
+Detailed per-slot metrics tracked in `leader_slot_metrics.rs`:
+- Transaction counts (processed, committed, failed)
+- Execution timing
+- Cost model throttling
+- Buffer utilization
+
+## Configuration
+
+### Key Parameters
+
+- **Worker Threads**: Control parallelism (4-64 workers)
+- **Buffer Size**: Maximum buffered packets (100k default)
+- **Batch Size**: Transactions per execution batch (64 default)
+- **Scheduler Type**: Greedy vs Priority Graph
+- **Block Production Method**: Legacy vs unified scheduler
+
+### SchedulerConfig
+
+From `scheduler_controller.rs`:
+
+```rust
+pub struct SchedulerConfig {
+    pub pacing_fill_time_millis: u64,  // Default: varies by scheduler
+    // ... additional scheduler-specific config
+}
+```
+
+## Key Files
+
+- `banking_stage.rs:1-200` - Main banking stage coordination
+- `consumer.rs:1-150` - Transaction execution orchestration
+- `committer.rs` - Transaction commitment to PoH
+- `transaction_scheduler/scheduler.rs:1-81` - Scheduler interface
+- `qos_service.rs` - Quality of service enforcement
+- `decision_maker.rs` - Leader/validator behavior decisions
+- `consume_worker.rs` - Parallel execution workers
+
+## Related Components
+
+- **PoH Recorder**: Receives committed transactions for ledger
+- **TPU**: Transaction Processing Unit providing input packets
+- **Bank**: Executes transactions against account state
+- **Blockstore**: Stores finalized entries and shreds

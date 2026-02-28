@@ -1,0 +1,123 @@
+---
+title: What is Agave?
+description: Agave is a fork of the original Solana validator software, maintained by Anza's core engineering team. It provides a high-performance validator client for the Solana blockchain ecosystem.
+---
+
+# What is Agave?
+
+Agave is a validator client for the Solana blockchain, maintained by the core engineering team at Anza. It is a fork of the original Solana validator software previously maintained by Solana Labs, and is now one of several Solana validator clients under active development.
+
+## The Solana Ecosystem
+
+Solana is a blockchain built for mass adoption. It's a high-performance network utilized for a range of use cases, including:
+
+- **Finance** - Decentralized finance (DeFi) applications
+- **NFTs** - Non-fungible token marketplaces and platforms
+- **Payments** - Fast, low-cost payment processing
+- **Gaming** - On-chain gaming and virtual economies
+
+Solana operates as a single global state machine and is designed to be open, interoperable, and decentralized.
+
+## Agave's Role
+
+Agave serves as the validator software that:
+
+- Processes transactions and maintains network consensus
+- Validates blocks and participates in the proof-of-stake protocol
+- Provides RPC endpoints for client applications
+- Maintains the ledger and account state
+
+<Note>
+Agave is one of several validator clients for Solana. Client diversity helps improve network resilience and decentralization.
+</Note>
+
+## Key Features
+
+### High Performance Architecture
+
+Agave makes extensive use of **pipelining**, an optimization technique common in CPU design. The validator contains two pipelined processes:
+
+- **TPU (Transaction Processing Unit)** - Used in leader mode to create ledger entries
+- **TVU (Transaction Validation Unit)** - Used in validator mode to validate ledger entries
+
+Both pipelines use the same hardware components:
+- Network input/output
+- GPU cards for parallel processing
+- CPU cores for computation
+- Disk writes for persistence
+
+### Proof-of-Stake Consensus
+
+Agave implements Solana's proof-of-stake consensus mechanism with:
+
+- **Tower BFT** - A custom consensus algorithm optimized for speed
+- **Voting** - Validators vote on blocks to reach consensus
+- **Staking** - Economic security through staked SOL tokens
+
+### Developer-Friendly Tools
+
+Agave ships with a complete CLI tool suite that includes:
+
+- `solana-test-validator` - Run a local single-node cluster for development
+- `solana` - Command-line interface for interacting with clusters
+- `solana-keygen` - Wallet and keypair management
+- Account management and transaction tools
+
+## Advantages for Development
+
+When using `solana-test-validator` for local development, you get:
+
+<CardGroup cols={2}>
+  <Card title="No Rate Limits" icon="infinity">
+    No RPC rate-limits on your local test validator
+  </Card>
+  <Card title="No Airdrop Limits" icon="faucet">
+    Request unlimited test SOL for development
+  </Card>
+  <Card title="Direct Deployment" icon="upload">
+    Deploy on-chain programs directly with `--bpf-program`
+  </Card>
+  <Card title="Clone Accounts" icon="clone">
+    Clone accounts from public clusters including programs
+  </Card>
+</CardGroup>
+
+### Configurable Testing Environment
+
+- **Transaction History** - Control ledger size with `--limit-ledger-size`
+- **Epoch Length** - Configure epoch length with `--slots-per-epoch`
+- **Time Travel** - Jump to arbitrary slots with `--warp-slot`
+- **Runtime Features** - Enable or disable specific runtime features
+
+## How Agave Differs
+
+As a fork of the original Solana validator maintained by Anza:
+
+- **Active Development** - Maintained by Anza's core engineering team
+- **Client Diversity** - One of several Solana validator implementations
+- **Community Focus** - Open-source with community contributions
+- **Production Ready** - Widely used on Solana mainnet-beta
+
+## Software Compatibility
+
+Agave maintains compatibility with the Solana ecosystem:
+
+- Uses the standard Solana CLI tools and conventions
+- Compatible with existing Solana programs and smart contracts
+- Interoperable with other Solana validator clients
+- Follows the Solana protocol specifications
+
+<Note>
+The Agave project follows semantic versioning and maintains backward compatibility with the Solana network protocol.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Install Agave" icon="download" href="/installation">
+    Get Agave installed on your system
+  </Card>
+  <Card title="Run a Test Validator" icon="play" href="/quickstart">
+    Start a local test validator for development
+  </Card>
+</CardGroup>

@@ -1,0 +1,361 @@
+---
+title: Proof of Stake
+description: Proof of Stake mechanism in Agave, including staking, delegation, epochs, slots, and rewards
+---
+
+Agave implements Proof of Stake (PoS) as its Sybil resistance mechanism. Validators are weighted by their delegated stake, which determines their influence on consensus and share of rewards.
+
+## Overview
+
+Proof of Stake in Solana provides:
+
+- **Sybil resistance** - Economic cost to create validators
+- **Consensus weighting** - Votes weighted by stake
+- **Incentive alignment** - Validators earn rewards for honest participation
+- **Economic security** - Attacking the network requires controlling significant stake
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:1`
+
+## Stake Accounts and Vote Accounts
+
+The staking system uses two types of accounts:
+
+### Vote Accounts
+
+Each validator has a **vote account** that:
+
+- Tracks validator votes on blocks
+- Counts vote credits earned
+- Stores validator commission rate
+- Records validator identity
+- Accumulates commission from rewards
+
+Vote accounts are **not aware** of delegated stake - they just record votes.
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:16`
+
+```rust
+pub struct VoteState {
+    pub node_pubkey: Pubkey,                 // Validator identity
+    pub authorized_voter: Pubkey,            // Key authorized to vote
+    pub authorized_withdrawer: Pubkey,       // Key authorized to withdraw
+    pub commission: u8,                      // Commission percentage (0-100)
+    pub votes: VecDeque<Lockout>,           // Recent votes
+    pub root_slot: Option<Slot>,            // Last finalized slot
+    pub credits: u64,                       // Lifetime vote credits earned
+}
+```
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:46`
+
+### Stake Accounts
+
+Stakers create **stake accounts** that:
+
+- Hold lamports (SOL) to be staked
+- Name a vote account to delegate to
+- Track rewards earned
+- Enforce warmup/cooldown periods
+- Support lock-up for long-term commitments
+
+Multiple stake accounts can delegate to the same vote account.
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:22`
+
+```rust
+pub struct StakeStateV2::Stake {
+    pub delegation: Delegation,
+    pub credits_observed: u64,
+}
+
+pub struct Delegation {
+    pub voter_pubkey: Pubkey,        // Vote account being delegated to
+    pub stake: u64,                  // Amount of stake (subject to warmup/cooldown)
+    pub activation_epoch: Epoch,     // When stake was activated
+    pub deactivation_epoch: Epoch,   // When stake was deactivated (or u64::MAX)
+}
+```
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:108`
+
+## Passive Delegation
+
+Staking is **passive** - validators don't need to approve delegations:
+
+- Stakers create stake accounts and delegate freely
+- No interactive action from validator required
+- Total stake is computed by summing all delegating stake accounts
+- Validators only need to vote; stake weights are handled automatically
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:28`
+
+<Info>
+This design allows unlimited stakers to delegate to a single validator without increasing the validator's operational overhead.
+</Info>
+
+## Epochs and Slots
+
+### Slots
+
+A **slot** is the basic time unit:
+
+- Duration: ~400 milliseconds
+- One designated leader per slot
+- Leader can produce one block per slot
+- Sequential numbering from genesis
+
+Slots are the building blocks of the blockchain timeline.
+
+### Epochs
+
+An **epoch** is a longer period for stake recalculation:
+
+- Duration: 432,000 slots (~2 days on mainnet)
+- Stake weights are recalculated at epoch boundaries
+- Leader schedule is regenerated each epoch
+- Rewards are distributed at epoch end
+- Warmup/cooldown progresses at epoch boundaries
+
+Source: `docs/src/implemented-proposals/tower-bft.md:15`
+
+<Note>
+Epoch boundaries are critical synchronization points where the cluster recalculates stake distribution and leader schedules.
+</Note>
+
+## Stake Warmup and Cooldown
+
+Stake doesn't become effective immediately:
+
+### Warmup Process
+
+When stake is delegated:
+
+1. **Initial state** - Stake is "activating" but not "effective"
+2. **Gradual activation** - Each epoch, some portion becomes effective
+3. **Rate limiting** - Network-wide warmup rate limits activation speed
+4. **Full activation** - Eventually all stake becomes effective
+
+The warmup rate is set to **25% of total effective stake per epoch**.
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:268`
+
+### Warmup Example
+
+Consider 1,000 SOL stake activating with 20% network warmup rate:
+
+| Epoch | Effective | Activating | Total Network Effective | Total Activating |
+|-------|-----------|------------|------------------------|------------------|
+| N-1   | 0         | 0          | 2,000                  | 0                |
+| N     | 0         | 1,000      | 2,000                  | 1,000            |
+| N+1   | 400       | 600        | 2,400                  | 600              |
+| N+2   | 880       | 120        | 2,880                  | 120              |
+| N+3   | 1,000     | 0          | 3,000                  | 0                |
+
+Stake becomes gradually effective over multiple epochs.
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:292`
+
+### Cooldown Process
+
+When stake is deactivated:
+
+1. **Deactivation initiated** - Stake marked for deactivation
+2. **Gradual cooldown** - Each epoch, some portion cools down
+3. **Rate limiting** - Same rate as warmup (25% per epoch)
+4. **Full cooldown** - Eventually all stake is withdrawable
+
+During cooldown:
+- Stake continues to earn rewards
+- Stake remains subject to potential slashing
+- Cooled down stake can be withdrawn
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:283`
+
+<Tip>
+Warmup and cooldown prevent rapid stake movement that could destabilize the network or enable attacks.
+</Tip>
+
+## Earning Rewards
+
+### Vote Credits
+
+Validators earn **vote credits** for voting correctly:
+
+- 1 credit per vote that exceeds maximum lockout
+- Credits earned when a vote becomes a root (finalized)
+- Recorded in the vote account's state
+- Used to calculate rewards at epoch end
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:259`
+
+### Points System
+
+Rewards are distributed based on **points**:
+
+```
+points = vote_credits × stake
+```
+
+- Each validator's stake earns points proportional to vote credits
+- More stake = more points per credit
+- More credits = more points per stake
+- Points determine share of epoch inflation
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:231`
+
+### Reward Calculation
+
+At epoch end:
+
+1. **Sum points** - Total all points earned across the network
+2. **Calculate point value** - Divide epoch inflation by total points
+3. **Distribute rewards** - Each stake earns `points × point_value`
+4. **Apply commission** - Validator takes commission, rest to staker
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:240`
+
+### Commission
+
+Validators set a commission rate (0-100%):
+
+```rust
+pub struct VoteInit {
+    pub node_pubkey: Pubkey,
+    pub authorized_voter: Pubkey,
+    pub authorized_withdrawer: Pubkey,
+    pub commission: u8,              // 0-100, percentage
+}
+```
+
+When rewards are claimed:
+- Commission goes to the vote account
+- Remaining rewards go to the stake account
+- Validators earn commission on all delegated stake
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:67`
+
+## Inflation and Rewards
+
+Solana has a disinflationary token emission schedule:
+
+- **Initial inflation rate** - 8% annually
+- **Disinflation rate** - Decreases 15% per year
+- **Long-term rate** - Approaches 1.5% annually
+- **Reward distribution** - Portion of inflation goes to stakers and validators
+
+Rewards are funded from protocol inflation, not transaction fees.
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:253`
+
+<Info>
+The rewards system incentivizes validators to maintain high uptime and vote accurately, as missing votes means missing credits and rewards.
+</Info>
+
+## Delegation Lifecycle
+
+### Creating a Stake Account
+
+1. Create account with System Program
+2. Transfer SOL to the account
+3. Initialize stake state
+4. Optionally set lock-up parameters
+
+### Delegating Stake
+
+```rust
+pub struct DelegateStake {
+    // Instruction data
+}
+```
+
+Delegation process:
+1. **Select validator** - Choose vote account to delegate to
+2. **Delegate** - Create delegation in stake account
+3. **Wait for warmup** - Stake activates over epochs
+4. **Earn rewards** - Receive proportional rewards
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:148`
+
+### Changing Delegation
+
+To switch validators:
+
+1. **Deactivate** - Initiate cooldown period
+2. **Wait for cooldown** - Stake deactivates over epochs
+3. **Redelegate** - Delegate to new validator
+4. **Wait for warmup** - Stake reactivates over epochs
+
+Direct switching is not supported - must fully deactivate first.
+
+### Withdrawing Stake
+
+To withdraw:
+
+1. Deactivate stake
+2. Wait for full cooldown
+3. Withdraw inactive stake plus rewards
+4. Only inactive lamports can be withdrawn
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:198`
+
+## Lock-up
+
+Stake accounts support **lock-up** for long-term commitments:
+
+```rust
+pub struct Lockup {
+    pub unix_timestamp: UnixTimestamp,  // Time-based lockup
+    pub epoch: Epoch,                   // Epoch-based lockup
+    pub custodian: Pubkey,              // Can sign to bypass lockup
+}
+```
+
+Lock-up prevents:
+- Withdrawing lamports before expiration
+- Changing authorized staker/withdrawer
+- Deactivating stake
+
+Unless the custodian also signs the transaction.
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:330`
+
+## Stake Distribution
+
+Network security depends on stake distribution:
+
+- **Decentralization** - Stake should spread across many validators
+- **Nakamoto coefficient** - Minimum validators needed for 1/3 stake
+- **Superminority** - Validators controlling >1/3 stake
+- **Anti-concentration** - Mechanisms to prevent stake centralization
+
+## Slashing (Planned)
+
+While not yet fully implemented, slashing is designed to punish:
+
+- **Equivocation** - Voting for conflicting blocks
+- **Downtime** - Excessive missed votes
+- **Other misbehavior** - Protocol violations
+
+Slashed stake would be burned or redistributed to honest validators.
+
+Source: `docs/src/proposals/slashing.md:1`
+
+<Note>
+Slashing is not currently active on mainnet but is planned for future implementation to strengthen economic security.
+</Note>
+
+## Stake-Weighted Operations
+
+Stake weights affect many cluster operations:
+
+- **Voting** - Consensus votes weighted by stake
+- **Leader schedule** - More stake = more leader slots
+- **Turbine fanout** - Stake affects propagation tree
+- **QUIC QoS** - Higher stake gets better bandwidth
+- **Gossip weights** - Stake influences peer selection
+
+## Next Steps
+
+- Learn about [consensus voting](./consensus)
+- Understand [cluster participation](./clusters)
+- Explore [validator operations](/validator/setup-guide)

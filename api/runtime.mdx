@@ -1,0 +1,452 @@
+---
+title: "Runtime"
+description: "Transaction execution engine and bank state management in Agave"
+---
+
+## Overview
+
+The Runtime subsystem is the core transaction execution engine in Agave. It centers on the **Bank** abstraction, which represents the state of all accounts at a specific slot. The runtime handles transaction processing, account loading, program invocation, state transitions, and finalization. It integrates with AccountsDB for persistent storage and the SVM (Solana Virtual Machine) for program execution.
+
+## Architecture
+
+### Core Components
+
+**Bank** (`bank.rs:1-200`): Represents a single slot's state, tracking accounts, transactions, and the ledger progression. Each bank points to a parent bank, forming a chain back to genesis.
+
+**TransactionBatchProcessor** (SVM): Executes batches of transactions against bank state.
+
+**AccountsBackgroundService** (`accounts_background_service.rs`): Background thread for account cleanup, snapshot generation, and storage optimization.
+
+**StatusCache**: Tracks processed transaction signatures to prevent replays.
+
+**RentCollector**: Enforces rent collection on accounts.
+
+**Stakes**: Manages validator stake accounts and voting state.
+
+### Bank Lifecycle
+
+From `bank.rs:19-32`, a bank progresses through stages:
+
+```
+1. Creation    - New bank created from parent
+2. Open        - Accepts transactions and state changes  
+3. Frozen      - No more changes; rent applied, sysvars updated
+4. Rooted      - Finalized; cannot be removed from chain
+```
+
+**Open**: Transactions are processed; PoH ticks advance.
+
+**Frozen**: `Bank::freeze()` called when slot complete:
+- Rent collection on all accessed accounts
+- Sysvar updates (Clock, SlotHashes, StakeHistory, etc.)
+- Hash computation for consensus
+- No further state changes permitted
+
+**Rooted**: `Bank::set_root()` marks finalization:
+- State cannot be rolled back
+- Older forks pruned
+- Accounts cleaned up
+
+## Transaction Processing
+
+### Processing Flow
+
+From `bank.rs:1-17`, high-level API:
+
+```rust
+Bank::process_transactions
+```
+
+Detailed flow:
+
+1. **Load Accounts**: Fetch accounts referenced by transaction from AccountsDB
+2. **Verify Signatures**: Check all transaction signatures
+3. **Check Age**: Ensure transaction not too old (MAX_PROCESSING_AGE)
+4. **Execute**: Invoke SVM to execute transaction instructions
+5. **Update Accounts**: Write modified accounts back to AccountsDB
+6. **Record Status**: Store transaction status in StatusCache
+
+### Load and Execute
+
+From the Bank implementation, transaction execution involves:
+
+```rust
+pub struct LoadAndExecuteTransactionsOutput {
+    pub loaded_transactions: Vec<TransactionLoadResult>,
+    pub execution_results: Vec<TransactionExecutionResult>,
+    pub execute_timings: ExecuteTimings,
+    // ...
+}
+```
+
+**Account Loading**:
+- Resolve account addresses (including address lookup tables)
+- Load account data from AccountsDB using ancestors
+- Validate fee payer has sufficient balance
+- Build `LoadedTransaction` with all account data
+
+**Execution**:
+- Create `TransactionBatchProcessor` context
+- Execute each instruction sequentially
+- Track compute unit consumption
+- Apply account changes atomically
+
+### Transaction Batching
+
+The Bank processes transactions in batches:
+
+```rust
+pub struct TransactionBatch<'a> {
+    lock_results: Vec<Result<()>>,
+    bank: &'a Bank,
+    sanitized_txs: Cow<'a, [SanitizedTransaction]>,
+    needs_unlock: bool,
+}
+```
+
+Batching enables:
+- Amortized lock acquisition
+- Parallel processing of non-conflicting transactions
+- Efficient account caching
+
+## Account Management
+
+### Account Loading
+
+From AccountsDB integration, banks load accounts considering:
+
+**Ancestors**: Set of parent slots where account may exist.
+
+```rust
+pub struct Ancestors {
+    // Map of slot -> depth in ancestry
+    ancestors: HashMap<Slot, usize>,
+}
+```
+
+Account resolution:
+1. Check current bank's AccountsCache
+2. Search AccountsDB using ancestors
+3. Return most recent version by slot
+
+### Account Locking
+
+From `account_locks.rs`, the runtime enforces locking:
+
+- **Read locks**: Shared access for read-only accounts
+- **Write locks**: Exclusive access for writable accounts
+- **Validation**: `validate_account_locks` prevents conflicts
+
+Locks held only during transaction batch execution, released immediately after.
+
+Maximum locks per transaction: `MAX_TX_ACCOUNT_LOCKS = 128`
+
+### Fee Payer Validation
+
+Before execution, validate fee payer:
+
+```rust
+validate_fee_payer(
+    &fee_payer_account,
+    fee_budget_limits,
+    &feature_set,
+)
+```
+
+Checks:
+- Account exists and has sufficient lamports
+- Fee can be deducted
+- Account not a program-owned account (unless allowed by feature)
+
+## Program Execution
+
+### SVM Integration
+
+The Bank delegates execution to the SVM (Solana Virtual Machine):
+
+**TransactionBatchProcessor**: Core SVM execution engine.
+
+**InvokeContext**: Runtime context passed to programs during execution.
+
+**TransactionProcessingCallback**: Callback interface for runtime operations (account loading, etc.).
+
+From `bank.rs:159-163`:
+
+```rust
+use solana_svm::{
+    account_loader::LoadedTransaction,
+    transaction_processor::{
+        ExecutionRecordingConfig,
+        TransactionBatchProcessor,
+        TransactionProcessingConfig,
+        TransactionProcessingEnvironment,
+    },
+};
+```
+
+### Program Loader
+
+Programs are loaded from accounts:
+
+1. **Resolve Program ID**: Get program account address
+2. **Load Program Account**: Fetch from AccountsDB
+3. **Verify Executable**: Check account marked as executable
+4. **Load Program Data**: For upgradeable programs, load separate data account
+5. **Compile/Cache**: JIT compile BPF bytecode, cache in ProgramCache
+
+### Builtin Programs
+
+From `bank.rs:103`:
+
+```rust
+use solana_builtins::{BUILTINS, STATELESS_BUILTINS};
+```
+
+Builtins are native programs:
+- System Program: Account creation, transfer
+- BPF Loader: Deploy and upgrade BPF programs
+- Vote Program: Validator voting
+- Stake Program: Staking and delegation
+- Config Program: Cluster configuration
+
+Builtins executed directly (not through BPF VM).
+
+### Compute Budget
+
+From `bank.rs:109`, compute limits enforced:
+
+```rust
+use solana_compute_budget::compute_budget::ComputeBudget;
+```
+
+**Default Limits**:
+- Max compute units per transaction
+- Max CPI (Cross-Program Invocation) depth
+- Max account data size
+
+Transactions can request custom compute budgets via ComputeBudgetProgram instructions.
+
+## State Transitions
+
+### Sysvar Updates
+
+When bank freezes, sysvars are updated:
+
+**Clock**: Current slot, epoch, timestamp.
+
+**SlotHashes**: Recent slot hashes (last 512 slots).
+
+**StakeHistory**: Historical stake activation/deactivation.
+
+**EpochSchedule**: Epoch boundaries and timing.
+
+**Rent**: Current rent rates.
+
+Sysvars are special accounts at well-known addresses that programs can read.
+
+### Rent Collection
+
+From `rent_collector.rs`, rent is collected on:
+
+- All accounts touched by transactions
+- Accounts below rent-exempt threshold
+- Deducts lamports based on account size and time
+
+Rent-exempt accounts (balance ≥ 2 years rent) are not charged.
+
+### Epoch Boundaries
+
+At epoch transitions, banks:
+
+1. **Calculate Staking Rewards**: Distribute inflation to validators
+2. **Update Stake State**: Activate/deactivate stake delegations
+3. **Leader Schedule**: Generate next epoch's leader schedule
+4. **Feature Activation**: Enable pending feature gates
+
+## Bank Forks
+
+### Fork Structure
+
+From `bank_forks.rs`, banks form a tree:
+
+```
+Genesis Bank (slot 0)
+   |
+   +-- Bank (slot 1)
+   |      |
+   |      +-- Bank (slot 2)
+   |      +-- Bank (slot 3)  [fork]
+   |
+   +-- Bank (slot 1')  [alternative fork]
+```
+
+**BankForks**: Manages multiple forks.
+
+**Root**: Single finalized chain.
+
+**Working Banks**: Active forks being built.
+
+### Fork Selection
+
+Consensus (Tower BFT) determines which fork to build on:
+
+- Vote on fork with highest stake weight
+- Switch forks if supermajority switches
+- Prune non-rooted forks periodically
+
+## Snapshots
+
+### Snapshot Generation
+
+From `accounts_background_service.rs`, background thread creates snapshots:
+
+**Full Snapshot**: Complete account state at a slot.
+
+**Incremental Snapshot**: Delta from last full snapshot.
+
+Snapshot contents:
+- AccountsDB state (all accounts)
+- Bank metadata (slot, hash, parent, etc.)
+- Staking state
+- Vote accounts
+
+Snapshots enable fast validator bootstrapping.
+
+### Snapshot Loading
+
+On startup, load snapshot:
+
+1. **Unpack Archive**: Extract snapshot files
+2. **Rebuild AccountsDB**: Load account data into AppendVecs
+3. **Reconstruct Bank**: Create Bank from saved metadata
+4. **Replay**: Replay slots from snapshot to current root
+
+## Partitioned Epoch Rewards
+
+From `partitioned_epoch_rewards.rs`, rewards are distributed across slots:
+
+**Motivation**: Large stake rewards (thousands of accounts) can't fit in single block.
+
+**Solution**: Partition reward credits across multiple slots.
+
+**EpochRewardStatus**:
+- Active: Currently distributing rewards
+- Inactive: No active distribution
+
+Reward distribution:
+1. **Calculate**: Determine reward amounts per stake account
+2. **Partition**: Split into slot-sized chunks
+3. **Distribute**: Credit accounts over subsequent slots
+
+## Metrics and Monitoring
+
+### Bank Metrics
+
+From `bank/metrics.rs`, extensive telemetry:
+
+- Transaction counts (processed, failed)
+- Execution timings
+- Account cache hit rates
+- Compute unit usage
+- Fee collection
+
+### Timings
+
+From `bank.rs` and SVM integration:
+
+```rust
+pub struct ExecuteTimings {
+    pub check_us: u64,
+    pub load_us: u64,
+    pub execute_us: u64,
+    pub store_us: u64,
+    // ...
+}
+```
+
+Breakdown of transaction processing time.
+
+### Cost Tracker
+
+From `bank.rs:111`:
+
+```rust
+use solana_cost_model::cost_tracker::CostTracker;
+```
+
+Tracks:
+- Total compute units in block
+- Writes per account (prevent account contention)
+- Block limits (ensure blocks processable)
+
+## Configuration
+
+### RuntimeConfig
+
+From `runtime_config.rs`, configurable parameters:
+
+```rust
+pub struct RuntimeConfig {
+    pub compute_budget: Option<ComputeBudget>,
+    pub log_messages_bytes_limit: Option<usize>,
+    pub transaction_account_lock_limit: Option<usize>,
+    // ...
+}
+```
+
+### Feature Gates
+
+Feature flags enable gradual rollout:
+
+```rust
+use agave_feature_set::{
+    FeatureSet,
+    increase_cpi_account_info_limit,
+    raise_cpi_nesting_limit_to_8,
+    // ... hundreds of features
+};
+```
+
+Features activate at specific slots via on-chain voting.
+
+## Performance Optimizations
+
+### Parallel Execution
+
+The runtime supports parallel transaction execution:
+
+- **Account-based Parallelism**: Non-conflicting transactions execute concurrently
+- **Thread Pools**: Rayon thread pool for parallel work
+- **Lock-free Reads**: AccountsDB supports concurrent readers
+
+### Caching
+
+**AccountsCache**: Write-through cache for hot accounts.
+
+**ProgramCache**: Compiled BPF programs cached in memory.
+
+**StatusCache**: Recent transaction statuses cached for deduplication.
+
+### Compute Optimizations
+
+- **BPF JIT**: JIT compilation of BPF programs for native execution
+- **SIMD Instructions**: Cryptographic operations use CPU SIMD extensions
+- **Precompiles**: Common operations (ed25519, secp256k1) have native implementations
+
+## Key Files
+
+- `bank.rs:1-200` - Core Bank implementation
+- `bank/mod.rs` - Bank module organization
+- `accounts_background_service.rs:1-100` - Background account maintenance
+- `transaction_batch.rs` - Transaction batching for execution
+- `rent_collector.rs` - Rent collection logic
+- `stakes.rs` - Stake account management
+- `status_cache.rs` - Transaction status tracking
+
+## Related Components
+
+- **AccountsDB**: Persistent account storage backend
+- **SVM**: Transaction and program execution engine
+- **Banking Stage**: Feeds transactions to Bank for execution
+- **Replay Stage**: Replays blocks through Bank for verification
+- **Snapshot Service**: Creates and loads snapshots

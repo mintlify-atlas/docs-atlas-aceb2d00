@@ -1,0 +1,254 @@
+---
+title: Testing
+description: Guide to running Agave's test suite, including unit tests, integration tests, benchmarks, and code coverage
+---
+
+Agave has a comprehensive test suite to ensure code quality and correctness. This guide covers running tests, generating coverage reports, and benchmarking performance.
+
+## Running Tests
+
+### Full Test Suite
+
+To run the complete test suite:
+
+```bash
+./cargo test
+```
+
+This executes all unit tests and integration tests across the entire workspace. The full test suite can take significant time to complete.
+
+### Running Specific Tests
+
+#### Test a Specific Package
+
+```bash
+# Test a specific crate
+./cargo test -p agave-validator
+
+# Test runtime crate
+./cargo test -p solana-runtime
+```
+
+#### Test a Specific Module
+
+```bash
+# Run tests in a specific module
+./cargo test --package agave-validator --lib validator
+
+# Run tests matching a pattern
+./cargo test test_process_transaction
+```
+
+#### Run a Single Test
+
+```bash
+# Run a specific test function
+./cargo test test_bank_new --exact
+
+# Show test output
+./cargo test test_bank_new -- --nocapture
+```
+
+## Test Types
+
+### Unit Tests
+
+Unit tests are embedded in the source code and test individual functions and modules:
+
+```bash
+# Run only unit tests (exclude integration tests)
+./cargo test --lib
+```
+
+### Integration Tests
+
+Integration tests are in the `tests/` directories and test component interactions:
+
+```bash
+# Run only integration tests
+./cargo test --test '*'
+```
+
+### Documentation Tests
+
+Documentation examples are also tested:
+
+```bash
+# Run doc tests
+./cargo test --doc
+```
+
+## Pre-Commit Testing
+
+Before pushing code, run these sanity checks:
+
+<Steps>
+  <Step title="Run sanity tests">
+    ```bash
+    ./ci/test-sanity.sh
+    ```
+    Checks basic code quality and formatting.
+  </Step>
+
+  <Step title="Run checks">
+    ```bash
+    ./ci/test-checks.sh
+    ```
+    Runs clippy lints and other static analysis.
+  </Step>
+
+  <Step title="Run feature checks">
+    ```bash
+    ./ci/feature-check/test-feature.sh
+    ```
+    Verifies feature gate configurations.
+  </Step>
+</Steps>
+
+<Note>
+  All pull requests must pass these checks before merging. Running them locally saves time in code review.
+</Note>
+
+## Benchmarking
+
+Agave uses criterion for benchmarking. Benchmarks require the nightly Rust toolchain.
+
+### Setup for Benchmarking
+
+<Steps>
+  <Step title="Install nightly Rust">
+    ```bash
+    rustup install nightly
+    ```
+  </Step>
+
+  <Step title="Run benchmarks">
+    ```bash
+    cargo +nightly bench
+    ```
+  </Step>
+</Steps>
+
+### Running Specific Benchmarks
+
+```bash
+# Benchmark a specific crate
+cargo +nightly bench -p solana-runtime
+
+# Run benchmarks matching a pattern
+cargo +nightly bench process_transaction
+```
+
+### Comparing Benchmark Results
+
+Benchmark results are saved in `target/criterion/`. You can compare results across runs to measure performance improvements or regressions.
+
+<Note>
+  When submitting performance-related changes, include benchmark results in your pull request to demonstrate the improvement.
+</Note>
+
+## Code Coverage
+
+### Generating Coverage Reports
+
+Agave provides a script to generate code coverage statistics:
+
+<Steps>
+  <Step title="Generate coverage">
+    ```bash
+    scripts/coverage.sh
+    ```
+    This runs the test suite with coverage instrumentation.
+  </Step>
+
+  <Step title="View coverage report">
+    ```bash
+    open target/cov/lcov-local/index.html
+    ```
+    Opens the HTML coverage report in your browser.
+  </Step>
+</Steps>
+
+### Coverage Philosophy
+
+Agave views code coverage primarily as a **developer productivity metric** rather than just a quality metric:
+
+- **Tests encode problems**: The unit test suite represents the set of problems the codebase solves
+- **Coverage protects solutions**: Adding tests protects your solution from future changes
+- **Coverage aids understanding**: If you don't understand why code exists, try deleting it and running tests - the nearest failure tells you what problem it solved
+- **Missing coverage indicates opportunity**: If no test fails when you delete code, either:
+  - The code is unnecessary (submit a PR asking about it)
+  - A test is missing (consider adding one)
+
+### Coverage Requirements
+
+All changes should include tests covering at least **90% of added code paths**. Tests should:
+- Run quickly
+- Be reliable (not flaky)
+- Cover both success and error cases
+- Use relevant test cases for stress testing
+
+## Test Infrastructure
+
+### Local Testnet
+
+To test validator functionality locally, start a local testnet:
+
+```bash
+# See online docs for instructions
+# https://docs.anza.xyz/clusters/benchmark
+```
+
+### Development Cluster
+
+For testing against a live network, use devnet:
+
+- **devnet** - Stable public cluster for development
+- Available at `devnet.solana.com`
+- Runs 24/7 with the latest features
+- See [public clusters documentation](https://docs.anza.xyz/clusters) for details
+
+## Continuous Integration
+
+All tests run automatically in CI on:
+- Every pull request
+- Every commit to master
+- Every release branch
+
+Check the CI status on your PR to ensure all tests pass before requesting review.
+
+## Troubleshooting Tests
+
+### Tests Timing Out
+
+If tests are timing out:
+
+```bash
+# Increase test timeout
+RUST_TEST_THREADS=1 cargo test -- --test-threads=1
+```
+
+### Flaky Tests
+
+If you encounter flaky tests:
+1. Run the test multiple times to confirm flakiness
+2. Check if the test depends on timing or external resources
+3. Report flaky tests to maintainers - they should be fixed or removed
+
+### Out of Disk Space
+
+Tests can generate significant temporary data:
+
+```bash
+# Clean build artifacts
+cargo clean
+
+# Clean test artifacts
+rm -rf target/tmp-test-*
+```
+
+## Next Steps
+
+- Review [contributing guidelines](/development/contributing) for code standards
+- Learn about the [release process](/development/release-process)
+- Submit your changes following the [PR workflow](/development/contributing#pull-request-style)

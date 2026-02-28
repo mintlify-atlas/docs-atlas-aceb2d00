@@ -1,0 +1,95 @@
+---
+title: Validator vs RPC Node
+description: Understanding the differences between voting validators and RPC nodes, when to run each type, and their resource requirements.
+---
+
+Before running a node on the Solana network, you need to decide whether you want to operate a consensus validator or an RPC node. Each has different purposes, incentives, and resource requirements.
+
+## What is a Validator?
+
+A validator is a computer that helps run the Solana network. Each validator executes a program that keeps track of all accounts on the Solana cluster and validates transactions being added to the network. Without validators, Solana would not be able to function.
+
+The more independent entities that run validators, the less vulnerable the cluster is to an attack or catastrophe that affects the cluster.
+
+By becoming a validator, you are helping to grow the network and learning first-hand how the Solana cluster functions at the lowest level. You will become part of an active community of operators that are passionate about the Solana ecosystem.
+
+## What is an RPC Node?
+
+An RPC (Remote Procedure Call) node runs the same software as a validator, but it does not participate in the consensus process. Technically you could run the RPC software and also allow your node to vote as a consensus node, but it is strongly discouraged because your node will not be performant enough to do either task well.
+
+A node that runs RPC has a much different purpose in the cluster. An RPC node responds to requests about the blockchain and also allows users of the RPC node to submit new transactions to be included in blocks.
+
+For example, a website might request to transfer tokens from wallet A to wallet B (given wallet A's permission). That website would have to use wallet A to sign a transaction and then send it to an RPC node to be submitted to the leader.
+
+## Consensus Validators
+
+As a validator your primary focus is maintaining the network and making sure that your node is performing optimally so that you can fully participate in the cluster consensus. You will want to attract a delegation of SOL to your validator which will allow your validator the opportunity to produce more blocks and earn rewards.
+
+### Economics
+
+Each staked validator earns inflation rewards from vote credits. Vote credits are assigned to validators that vote on blocks produced by the leader. The vote credits are given to all validators that successfully vote on blocks that are added to the blockchain.
+
+Additionally, when the validator is the leader, it can earn transaction fees and storage rent fees for each block that it produces that is added to the blockchain.
+
+Since all votes in Solana happen on the blockchain, a validator incurs a transaction cost for each vote that it makes. These transaction fees amount to approximately 1.0 SOL per day.
+
+<Warning>
+It is important to make sure your validator always has enough SOL in its identity account to pay for vote transactions!
+</Warning>
+
+All validators who vote (consensus validators) must pay vote transaction fees for blocks that they agree with. The cost of voting can be up to 1.1 SOL per day.
+
+A voting validator can earn SOL through 2 methods:
+
+1. **Inflationary rewards** paid at the end of an epoch
+2. **Transaction fees** - earning 50% of transaction fees for the blocks produced by the validator
+
+## RPC Nodes
+
+While RPC operators **do NOT** receive rewards (because the node is not participating in voting), there are different motivations for running an RPC node.
+
+An RPC operator is providing a service to users who want to interact with the Solana blockchain. Because your primary user is often technical, you will have to be able to answer technical questions about performance of RPC calls.
+
+If you are operating an RPC node as a business, your job will also involve scaling your system to meet the demands of the users. For example, some RPC providers create dedicated servers for projects that require a high volume of requests to the node. Someone with a background in development operations or software engineering will be a very important part of your team.
+
+Alternatively, you may be a development team that would like to run their own infrastructure. In this case, the RPC infrastructure could be a part of your production stack. A development team could use the Geyser plugin, for example, to get real time access to information about accounts or blocks in the cluster.
+
+## When to Run Each Type
+
+### Run a Consensus Validator if:
+
+- You want to help secure the Solana network
+- You want to earn staking rewards and transaction fees
+- You have the technical expertise to maintain a high-performance node
+- You can monitor and respond to issues 24/7
+- You have or can attract stake delegation
+
+### Run an RPC Node if:
+
+- You need reliable RPC access for your application
+- You want to provide RPC services to other developers
+- You need custom indexing or Geyser plugin access
+- You don't want the operational overhead of voting
+- You're building a business around RPC services
+
+## Resource Requirements Comparison
+
+| Component | Validator Requirements | RPC Node Requirements |
+|-----------|------------------------|------------------------|
+| **CPU** | 12 cores / 24 threads | 16 cores / 32 threads |
+| **RAM** | 256GB or more | 512GB or more (with account indexes) |
+| **Disk** | 1TB accounts + 1TB ledger | Larger ledger if longer history needed |
+| **Network** | 2+ Gbps (10 Gbps recommended for staked nodes) | 1+ Gbps |
+| **SOL** | 0.02685864 SOL for vote account + ~1.1 SOL/day for voting | No voting costs |
+
+<Note>
+Accounts and ledger should **NOT** be stored on the same disk for RPC nodes to ensure optimal performance.
+</Note>
+
+## Your Role As A Validator
+
+As a validator, you are helping to secure the network by producing and voting on blocks and to improve decentralization by running an independent node. You have the right to participate in discussions of changes on the network. You are also assuming a responsibility to keep your system running properly, to make sure your system is secure, and to keep it up to date with the latest software.
+
+As more individuals stake their tokens to your validator, you can reward their trust by running a high performing and reliable validator. Your validator should be performing well a majority of the time, but you should also have systems in place to respond to an outage at any time of the day.
+
+Running a validator is a technical and important task, but it can also be very rewarding. Good luck and welcome to the community.

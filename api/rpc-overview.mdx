@@ -1,0 +1,202 @@
+---
+title: JSON-RPC API Overview
+description: Introduction to the Agave validator JSON-RPC API for interacting with Solana blockchain
+---
+
+The Agave validator exposes a comprehensive JSON-RPC API over HTTP and WebSocket for interacting with the Solana blockchain. This API provides access to account data, transaction submission, block information, and real-time event subscriptions.
+
+## API Endpoint Configuration
+
+The RPC service is configured through the `JsonRpcConfig` structure in the validator. Key configuration options include:
+
+### HTTP JSON-RPC Endpoint
+
+By default, the HTTP JSON-RPC server listens on:
+- **Mainnet/Devnet**: Port 8899
+- **Testnet**: Port 8899
+- **Local**: `http://localhost:8899`
+
+Common public endpoints:
+```
+https://api.mainnet-beta.solana.com
+https://api.devnet.solana.com
+https://api.testnet.solana.com
+```
+
+### WebSocket PubSub Endpoint
+
+The WebSocket server provides real-time subscriptions:
+- **Mainnet/Devnet**: Port 8900 (default)
+- **Local**: `ws://localhost:8900`
+
+Public WebSocket endpoints:
+```
+wss://api.mainnet-beta.solana.com
+wss://api.devnet.solana.com
+wss://api.testnet.solana.com
+```
+
+## Configuration Options
+
+The `JsonRpcConfig` structure provides several configuration parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `enable_rpc_transaction_history` | bool | Enable transaction history queries |
+| `enable_extended_tx_metadata_storage` | bool | Store extended transaction metadata |
+| `faucet_addr` | Option\<SocketAddr\> | Faucet address for airdrop requests |
+| `health_check_slot_distance` | u64 | Slot distance threshold for health checks |
+| `skip_preflight_health_check` | bool | Skip health check during transaction preflight |
+| `max_multiple_accounts` | Option\<usize\> | Max accounts in getMultipleAccounts (default: 100) |
+| `rpc_threads` | usize | Number of RPC worker threads |
+| `rpc_blocking_threads` | usize | Number of blocking operation threads |
+| `full_api` | bool | Enable full API including historical methods |
+| `max_request_body_size` | Option\<usize\> | Maximum request body size (default: 50KB) |
+| `disable_health_check` | bool | Disable health check endpoint |
+
+## Request/Response Format
+
+All HTTP requests use JSON-RPC 2.0 specification:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "methodName",
+  "params": []
+}
+```
+
+Response format:
+```json
+{
+  "jsonrpc": "2.0",
+  "result": { /* result data */ },
+  "id": 1
+}
+```
+
+Error response:
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32600,
+    "message": "Invalid request"
+  },
+  "id": 1
+}
+}
+```
+
+## Authentication
+
+Public RPC endpoints do not require authentication. However, production applications should:
+
+1. **Use rate-limited endpoints** or run your own validator
+2. **Implement retry logic** with exponential backoff
+3. **Monitor rate limit headers** (if available)
+4. **Consider private RPC providers** for production workloads
+
+## Rate Limiting
+
+### Public Endpoints
+
+Public Solana RPC endpoints implement rate limiting:
+- HTTP status `429 Too Many Requests` when limits exceeded
+- `Retry-After` header indicates retry delay (seconds)
+- Default retry logic: 5 retries with 500ms delay
+
+### Rate Limit Best Practices
+
+1. **Implement exponential backoff**
+   ```javascript
+   if (response.status === 429) {
+     const retryAfter = response.headers.get('Retry-After');
+     await sleep(retryAfter * 1000);
+   }
+   ```
+
+2. **Use WebSocket subscriptions** for real-time data instead of polling
+3. **Batch requests** using `getMultipleAccounts` when possible
+4. **Cache responses** where appropriate
+5. **Run your own RPC node** for high-volume applications
+
+## API Categories
+
+The Agave RPC API is organized into several modules:
+
+### Minimal API (`rpc_minimal`)
+Core methods expected on all validators:
+- `getBalance`, `getBlockHeight`, `getEpochInfo`
+- `getHealth`, `getIdentity`, `getSlot`
+- `getTransactionCount`, `getVersion`
+
+### Bank Data API (`rpc_bank`)
+Methods depending on immediate bank data:
+- `getMinimumBalanceForRentExemption`
+- `getInflationGovernor`, `getInflationRate`
+- `getEpochSchedule`, `getSlotLeader`
+
+### Accounts API (`rpc_accounts`)
+Account data retrieval:
+- `getAccountInfo`, `getMultipleAccounts`
+- `getTokenAccountBalance`, `getTokenSupply`
+
+### Accounts Scan API (`rpc_accounts_scan`)
+Methods requiring account scans:
+- `getProgramAccounts`, `getLargestAccounts`
+- `getTokenAccountsByOwner`, `getTokenAccountsByDelegate`
+
+### Full API (`rpc_full`)
+Complete historical and transaction methods:
+- `sendTransaction`, `simulateTransaction`
+- `getBlock`, `getTransaction`
+- `getSignaturesForAddress`
+
+## Context and Commitment
+
+Many methods return a `Response` object with context:
+
+```json
+{
+  "context": {
+    "slot": 123456789
+  },
+  "value": { /* result */ }
+}
+```
+
+Commitment levels:
+- `processed`: Query most recent block (may be skipped)
+- `confirmed`: Query optimistically confirmed block
+- `finalized`: Query finalized block (cannot be rolled back)
+
+## Request Size Limits
+
+- **Default max request body**: 50 KB (`MAX_REQUEST_BODY_SIZE`)
+- **Max accounts in getMultipleAccounts**: 100 (configurable)
+- **Max signature statuses**: 256 queries
+- **Max confirmed blocks range**: 500,000 blocks
+- **Max slot leaders**: 5,000
+
+## Error Codes
+
+Common JSON-RPC error codes:
+
+| Code | Message | Description |
+|------|---------|-------------|
+| -32600 | Invalid Request | Malformed JSON-RPC request |
+| -32601 | Method not found | RPC method does not exist |
+| -32602 | Invalid params | Invalid method parameters |
+| -32603 | Internal error | Internal RPC server error |
+| -32005 | Node unhealthy | Validator is behind or unhealthy |
+| -32007 | Slot skipped | The requested slot was skipped |
+| -32009 | Block not available | Block data not available |
+| -32014 | Min context slot not reached | Request requires higher slot |
+
+## Next Steps
+
+- [HTTP Methods](/api/http-methods) - Detailed HTTP JSON-RPC method reference
+- [WebSocket Methods](/api/websocket-methods) - Real-time subscription methods
+- [Deprecated Methods](/api/deprecated-methods) - Legacy methods and migration guide

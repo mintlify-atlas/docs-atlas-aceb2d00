@@ -1,0 +1,139 @@
+---
+title: Architecture Overview
+description: High-level architecture of the Agave validator, including TPU, TVU, consensus, runtime, and core components
+---
+
+The Agave validator is a high-performance blockchain validator implementation for Solana, designed from the ground up for parallel transaction processing and fast consensus. This page provides an overview of the validator's architecture and its core components.
+
+## System Architecture
+
+The Agave validator is built around a pipelined architecture that maximizes throughput by processing different stages of transaction validation and block production concurrently. The validator operates in two primary modes:
+
+- **Leader mode** - When producing blocks via the TPU (Transaction Processing Unit)
+- **Validator mode** - When validating blocks via the TVU (Transaction Validation Unit)
+
+## Core Components
+
+The validator consists of several interconnected subsystems, each responsible for specific aspects of blockchain operation:
+
+### Transaction Processing Unit (TPU)
+
+The TPU is responsible for block production when the validator is the designated leader. It implements a multi-stage pipeline:
+
+- **QUIC Streamers** - Receive transactions from clients over QUIC protocol
+- **SigVerify Stage** - Validates transaction signatures in parallel
+- **Banking Stage** - Processes transactions and updates account state
+- **Forwarding Stage** - Forwards transactions to upcoming leaders
+- **Broadcast Stage** - Disseminates blocks to the network via Turbine
+
+Source: `core/src/tpu.rs:1`
+
+### Transaction Validation Unit (TVU)
+
+The TVU validates and processes blocks received from the network when the validator is not the leader:
+
+- **Shred Fetch Stage** - Receives shreds (data fragments) from network
+- **Shred SigVerify** - Verifies shred signatures
+- **Window Service** - Handles repair requests and assembles complete blocks
+- **Replay Stage** - Executes transactions and updates local state
+- **Retransmit Stage** - Propagates shreds to other validators
+
+Source: `core/src/tvu.rs:1`
+
+### Consensus System
+
+Agave implements **Tower BFT**, a Proof-of-Stake consensus mechanism based on PBFT with exponential lockouts:
+
+- Validators vote on blocks using their stake weight
+- Votes create lockouts that double with each confirmation
+- Fork choice is based on stake-weighted voting
+- Finality is achieved through supermajority consensus
+
+Source: `core/src/consensus.rs:1`
+
+<Note>
+Tower BFT provides Byzantine Fault Tolerance while maintaining high throughput by leveraging Proof of History for time synchronization.
+</Note>
+
+### Runtime System
+
+The **Sealevel** runtime is Agave's parallel transaction execution engine:
+
+- Executes Solana programs in a sandboxed environment
+- Supports parallel transaction processing when accounts don't conflict
+- Implements the Solana Virtual Machine (SVM) for program execution
+- Manages account state and enforces runtime rules
+
+Source: `runtime/src/bank.rs:1`, `program-runtime/src/invoke_context.rs:1`
+
+### Ledger and Storage
+
+**Blockstore** is the persistent storage layer that manages blockchain data:
+
+- Stores shreds (data and coding shreds for erasure coding)
+- Maintains fork information until finality
+- Supports replay from any point in the ledger
+- Implements RocksDB-based storage for durability
+
+Source: `ledger/src/blockstore.rs:1`
+
+### Gossip Network
+
+**Gossip Service** provides cluster-wide information dissemination:
+
+- Shares validator contact information and metadata
+- Propagates votes and cluster state
+- Implements push/pull protocols for efficient distribution
+- Uses stake-weighting to prevent eclipse attacks
+
+Source: `gossip/src/cluster_info.rs:1`
+
+## Data Flow
+
+The validator processes data through several coordinated pipelines:
+
+### Block Production Flow (TPU)
+
+1. Transactions arrive via QUIC connections
+2. Signatures are verified in parallel
+3. Valid transactions enter the Banking Stage
+4. Banking Stage executes transactions against the current bank
+5. Proof of History records transaction ordering
+6. Completed blocks are broadcast via Turbine
+
+### Block Validation Flow (TVU)
+
+1. Shreds arrive from network peers
+2. Signatures are verified
+3. Window Service assembles complete blocks
+4. Replay Stage executes transactions
+5. Validator votes on valid blocks
+6. Shreds are retransmitted to other validators
+
+## Pipelining Architecture
+
+Agave makes extensive use of pipelining, similar to CPU design, to maximize throughput:
+
+- Each stage processes data independently
+- Data flows through channels between stages
+- Stages run concurrently on different hardware (network, GPU, CPU cores, disk)
+- Pipeline throughput is limited by the slowest stage
+
+<Info>
+This pipelined design allows the validator to process thousands of transactions per second while maintaining low confirmation times.
+</Info>
+
+## Key Design Principles
+
+1. **Parallelism** - Execute non-conflicting transactions simultaneously
+2. **Pipelining** - Process different stages concurrently
+3. **Stake-Weighting** - Use economic incentives for security
+4. **Verifiable Delay Function** - Proof of History provides ordering
+5. **Erasure Coding** - Turbine ensures efficient block propagation
+
+## Next Steps
+
+- Learn about the [internal structure of a validator](./validator-anatomy)
+- Understand [Tower BFT consensus](./consensus)
+- Explore the [Sealevel runtime](./runtime)
+- Learn about [clusters and networks](./clusters)

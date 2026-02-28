@@ -1,0 +1,530 @@
+---
+title: Deprecated RPC Methods
+description: Legacy RPC methods and migration guide for the Agave validator
+---
+
+This page documents deprecated RPC methods in the Agave validator and provides migration guidance to their modern replacements.
+
+## Overview
+
+Several RPC methods have been deprecated as Solana has evolved. These methods may still be available for backward compatibility but should not be used in new applications.
+
+<Warning>
+  Deprecated methods may be removed in future versions. Migrate to replacement methods as soon as possible.
+</Warning>
+
+## Deprecated Transaction Methods
+
+### getConfirmedBlock
+
+**Status**: Deprecated
+
+**Replacement**: `getBlock`
+
+This method was renamed to better reflect that blocks can be at different commitment levels, not just "confirmed".
+
+```json Before (Deprecated)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getConfirmedBlock",
+  "params": [430]
+}
+```
+
+```json After (Current)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getBlock",
+  "params": [
+    430,
+    {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0
+    }
+  ]
+}
+```
+
+**Migration Notes**:
+- Replace `getConfirmedBlock` with `getBlock`
+- Add `maxSupportedTransactionVersion` parameter for versioned transactions
+- Consider using `commitment` parameter for different commitment levels
+
+---
+
+### getConfirmedBlocks
+
+**Status**: Deprecated
+
+**Replacement**: `getBlocks`
+
+Returns a list of confirmed blocks between two slots.
+
+```json Before (Deprecated)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getConfirmedBlocks",
+  "params": [5, 10]
+}
+```
+
+```json After (Current)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getBlocks",
+  "params": [
+    5,
+    10,
+    {
+      "commitment": "finalized"
+    }
+  ]
+}
+```
+
+**Migration Notes**:
+- Replace `getConfirmedBlocks` with `getBlocks`
+- Maximum range is 500,000 blocks (`MAX_GET_CONFIRMED_BLOCKS_RANGE`)
+- Use `getBlocksWithLimit` for paginated queries
+
+---
+
+### getConfirmedBlocksWithLimit
+
+**Status**: Deprecated
+
+**Replacement**: `getBlocksWithLimit`
+
+Returns a list of confirmed blocks starting at a given slot with a limit.
+
+```json Before (Deprecated)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getConfirmedBlocksWithLimit",
+  "params": [5, 3]
+}
+```
+
+```json After (Current)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getBlocksWithLimit",
+  "params": [
+    5,
+    3,
+    {
+      "commitment": "finalized"
+    }
+  ]
+}
+```
+
+---
+
+### getConfirmedTransaction
+
+**Status**: Deprecated
+
+**Replacement**: `getTransaction`
+
+Retrieves transaction details for a confirmed transaction.
+
+```json Before (Deprecated)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getConfirmedTransaction",
+  "params": [
+    "2nBhEBYYvfaAe16UMNqRHre4YNSskvuYgx3M6E4JP1oDYvZEJHvoPzyUidNgNX5r9sTyN1J9UxtbCXy2rqYcuyuv"
+  ]
+}
+```
+
+```json After (Current)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getTransaction",
+  "params": [
+    "2nBhEBYYvfaAe16UMNqRHre4YNSskvuYgx3M6E4JP1oDYvZEJHvoPzyUidNgNX5r9sTyN1J9UxtbCXy2rqYcuyuv",
+    {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+    }
+  ]
+}
+```
+
+**Migration Notes**:
+- Add `maxSupportedTransactionVersion: 0` to support versioned transactions
+- Without this parameter, versioned transactions will return an error
+- Specify `commitment` level explicitly
+
+---
+
+### getConfirmedSignaturesForAddress2
+
+**Status**: Deprecated
+
+**Replacement**: `getSignaturesForAddress`
+
+Returns signatures for confirmed transactions involving an address.
+
+```json Before (Deprecated)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getConfirmedSignaturesForAddress2",
+  "params": [
+    "Vote111111111111111111111111111111111111111",
+    {
+      "limit": 10
+    }
+  ]
+}
+```
+
+```json After (Current)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getSignaturesForAddress",
+  "params": [
+    "Vote111111111111111111111111111111111111111",
+    {
+      "limit": 10,
+      "commitment": "finalized"
+    }
+  ]
+}
+```
+
+**Migration Notes**:
+- Maximum limit is 1,000 signatures (`MAX_GET_CONFIRMED_SIGNATURES_FOR_ADDRESS2_LIMIT`)
+- Results are returned in reverse chronological order
+- Use `before` and `until` parameters for pagination
+
+---
+
+## Deprecated Blockhash Methods
+
+### getRecentBlockhash
+
+**Status**: Deprecated
+
+**Replacement**: `getLatestBlockhash`
+
+Returns the latest blockhash and fee calculator.
+
+```json Before (Deprecated)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getRecentBlockhash",
+  "params": [
+    {
+      "commitment": "finalized"
+    }
+  ]
+}
+```
+
+```json After (Current)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getLatestBlockhash",
+  "params": [
+    {
+      "commitment": "finalized"
+    }
+  ]
+}
+```
+
+**Response Changes**:
+
+```json Before (Deprecated)
+{
+  "result": {
+    "context": { "slot": 123 },
+    "value": {
+      "blockhash": "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+      "feeCalculator": {
+        "lamportsPerSignature": 5000
+      }
+    }
+  }
+}
+```
+
+```json After (Current)
+{
+  "result": {
+    "context": { "slot": 123 },
+    "value": {
+      "blockhash": "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+      "lastValidBlockHeight": 123456
+    }
+  }
+}
+```
+
+**Migration Notes**:
+- `feeCalculator` has been removed
+- Use `lastValidBlockHeight` to determine transaction validity
+- For fees, use `getFeeForMessage` instead
+
+---
+
+### getFeeCalculatorForBlockhash
+
+**Status**: Deprecated
+
+**Replacement**: `getFeeForMessage` or `isBlockhashValid`
+
+Returns fee calculator for a specific blockhash.
+
+```json Before (Deprecated)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getFeeCalculatorForBlockhash",
+  "params": [
+    "GJxqhuxcgfn5Tcj6y3f8X4FeCDd2RQ6SnEMo1AAxrPRZ"
+  ]
+}
+```
+
+```json After (Current)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getFeeForMessage",
+  "params": [
+    "<base64-encoded-message>",
+    {
+      "commitment": "finalized"
+    }
+  ]
+}
+```
+
+**Migration Notes**:
+- `getFeeForMessage` calculates fees for a specific transaction message
+- Returns exact fee in lamports, not a fee calculator
+- Use `isBlockhashValid` to check if blockhash is still valid
+
+---
+
+### getFees
+
+**Status**: Deprecated
+
+**Replacement**: `getLatestBlockhash` + `getFeeForMessage`
+
+Returns fee schedule and recent blockhash.
+
+```json Before (Deprecated)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getFees"
+}
+```
+
+```json After (Current)
+// Get blockhash
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getLatestBlockhash"
+}
+
+// Get fee for specific transaction
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "getFeeForMessage",
+  "params": ["<base64-encoded-message>"]
+}
+```
+
+---
+
+### getFeeRateGovernor
+
+**Status**: Deprecated
+
+**Replacement**: None (fees are now market-driven)
+
+Returns the fee rate governor configuration.
+
+**Migration Notes**:
+- Solana now uses market-based prioritization fees
+- Use `getRecentPrioritizationFees` to get current fee market data
+- Base fees are fixed at 5,000 lamports per signature
+
+---
+
+## Deprecated Slot Methods
+
+### getSnapshotSlot
+
+**Status**: Deprecated
+
+**Replacement**: `getHighestSnapshotSlot`
+
+Returns the highest slot with a snapshot.
+
+```json Before (Deprecated)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getSnapshotSlot"
+}
+```
+
+```json After (Current)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getHighestSnapshotSlot"
+}
+```
+
+**Response Changes**:
+
+```json Before (Deprecated)
+{
+  "result": 100000
+}
+```
+
+```json After (Current)
+{
+  "result": {
+    "full": 100000,
+    "incremental": 100200
+  }
+}
+```
+
+**Migration Notes**:
+- New method distinguishes between full and incremental snapshots
+- Returns object instead of single number
+- Access full snapshot slot via `result.full`
+
+---
+
+### minimumLedgerSlot
+
+**Status**: Deprecated (but still present in `rpc_full`)
+
+**Replacement**: `getFirstAvailableBlock`
+
+Returns the lowest slot that the node has information about.
+
+```json Before (Deprecated)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "minimumLedgerSlot"
+}
+```
+
+```json After (Current)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getFirstAvailableBlock"
+}
+```
+
+**Implementation**: `rpc/src/rpc.rs:3516-3517`
+
+---
+
+## Migration Checklist
+
+When migrating from deprecated methods:
+
+- [ ] Replace all `getConfirmed*` methods with non-prefixed versions
+- [ ] Add `maxSupportedTransactionVersion` parameter to transaction queries
+- [ ] Replace `getRecentBlockhash` with `getLatestBlockhash`
+- [ ] Use `getFeeForMessage` instead of fee calculator methods
+- [ ] Replace `getSnapshotSlot` with `getHighestSnapshotSlot`
+- [ ] Update response parsing to handle new data structures
+- [ ] Test with `commitment` parameter set explicitly
+- [ ] Update error handling for new error codes
+
+---
+
+## Commitment Level Changes
+
+The `commitment` parameter has evolved:
+
+### Old Commitment Levels (Deprecated)
+- `max`: Maximum vote stake
+- `root`: Superseded by `finalized`
+- `recent`: Use `processed` instead
+
+### Current Commitment Levels
+- `processed`: Latest block (may be skipped)
+- `confirmed`: Optimistically confirmed by cluster
+- `finalized`: Finalized by supermajority (cannot be rolled back)
+
+**Migration**:
+```javascript
+// Before
+commitment: "max"     → commitment: "processed"
+commitment: "root"    → commitment: "finalized"
+commitment: "recent"  → commitment: "processed"
+```
+
+---
+
+## Version-Specific Changes
+
+### Versioned Transactions (v1.14+)
+
+Versioned transactions require explicit opt-in:
+
+```json
+{
+  "maxSupportedTransactionVersion": 0
+}
+```
+
+**Without this parameter**:
+- Queries for versioned transactions will fail
+- Error: "Transaction version not supported"
+
+**Migration**:
+Add to all transaction-related queries:
+- `getTransaction`
+- `getBlock`
+- `simulateTransaction`
+
+---
+
+## Additional Resources
+
+- **Source Code**: Check `rpc/src/rpc.rs` for current method implementations
+- **Error Handling**: See RPC Overview for error codes
+- **Testing**: Use devnet/testnet endpoints to test migrations before mainnet
+
+## Support
+
+If you encounter issues during migration:
+1. Check the [HTTP Methods](/api/http-methods) documentation for current method signatures
+2. Review commitment level requirements
+3. Test on devnet first
+4. Ensure `maxSupportedTransactionVersion` is set for transaction queries

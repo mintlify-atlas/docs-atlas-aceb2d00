@@ -1,0 +1,249 @@
+---
+title: Validator Anatomy
+description: Internal structure of an Agave validator node, including TPU, TVU, and core services
+---
+
+An Agave validator is a sophisticated piece of software that operates in two distinct modes depending on whether it is currently the leader or validating blocks produced by others. This page explores the internal structure and services that make up a validator node.
+
+## Validator Modes
+
+The validator switches between two operational modes:
+
+- **Leader Mode (TPU)** - Produces blocks when scheduled as the cluster leader
+- **Validator Mode (TVU)** - Validates and votes on blocks produced by other leaders
+
+Both modes run concurrently, but the TPU is only actively producing blocks during the validator's assigned leader slots.
+
+## Pipelining Architecture
+
+Validators use pipelining extensively to maximize throughput. Like a CPU pipeline or an assembly line, different stages of transaction processing occur simultaneously on different hardware resources.
+
+<Info>
+Think of pipelining like a laundry process: while one load is being washed, another can be dried, and a third can be folded. Each stage uses different hardware and can operate independently.
+</Info>
+
+The validator maps different stages to specific hardware:
+- **Network I/O** - QUIC endpoints for receiving/sending data
+- **GPU** - Signature verification (when available)
+- **CPU cores** - Transaction execution, banking, consensus
+- **Disk I/O** - Blockstore writes and reads
+
+Source: `docs/src/architecture/validator-anatomy.md:10`
+
+## Transaction Processing Unit (TPU)
+
+The TPU implements the block production pipeline. It consists of several interconnected stages:
+
+### QUIC Streamers
+
+Three separate QUIC servers handle different types of traffic:
+
+- **TPU QUIC** - Regular transaction ingestion
+- **TPU Forwards QUIC** - Forwarded transactions from other validators
+- **TPU Vote QUIC** - Vote transactions (higher priority)
+
+QUIC provides:
+- Stake-weighted Quality of Service (QoS)
+- Connection limits based on sender stake
+- Rate limiting to prevent spam
+- Stream multiplexing for efficiency
+
+Source: `core/src/tpu.rs:211`
+
+### Fetch Stage
+
+Receives UDP vote packets and manages the packet ingress pipeline:
+- Allocates packet memory
+- Reads from vote sockets
+- Applies initial packet coalescing
+- Forwards to signature verification
+
+Source: `core/src/tpu.rs:165`
+
+### SigVerify Stage
+
+Parallel signature verification stage:
+- Uses a Rayon thread pool for parallel verification
+- Deduplicates packets before verification
+- Applies load shedding under high load
+- Sets discard flag on invalid signatures
+- Separates vote and non-vote transactions
+
+Source: `core/src/tpu.rs:266`
+
+<Note>
+Signature verification is one of the most CPU-intensive operations in transaction processing. Parallelizing it across multiple cores is critical for high throughput.
+</Note>
+
+### Banking Stage
+
+The heart of transaction processing:
+- Buffers transactions when approaching leader slot
+- Executes transactions against the Bank (account state)
+- Locks accounts to prevent conflicts
+- Parallelizes non-conflicting transactions
+- Records transactions in Proof of History
+- Handles transaction scheduling and prioritization
+
+Implements multiple scheduling strategies:
+- Unified Scheduler (default) - Advanced parallel scheduler
+- Central Scheduler - Centralized transaction coordination
+
+Source: `core/src/tpu.rs:305`
+
+### Forwarding Stage
+
+Forwards transactions to upcoming leaders:
+- Determines next leader from the schedule
+- Prioritizes transactions for forwarding
+- Forwards votes unconditionally
+- Forwards non-vote transactions based on configuration
+- Uses QUIC for efficient forwarding
+
+Source: `core/src/tpu.rs:329`
+
+### Broadcast Stage
+
+Disseminates blocks to the network:
+- Receives entries from Banking Stage
+- Serializes entries into shreds (fragments)
+- Signs shreds with validator identity
+- Generates erasure codes for fault tolerance
+- Broadcasts via Turbine tree structure
+
+Source: `core/src/tpu.rs:354`
+
+## Transaction Validation Unit (TVU)
+
+The TVU implements the block validation pipeline:
+
+### Shred Fetch Stage
+
+Receives block fragments from the network:
+- Listens on multiple UDP sockets for shreds
+- Receives repair responses via QUIC
+- Distributes work across threads
+- Filters shreds by version
+- Handles retransmitted shreds
+
+Source: `core/src/tvu.rs:321`
+
+### Shred SigVerify
+
+Verifies shred signatures in parallel:
+- Validates leader signatures on shreds
+- Checks that shreds are from the expected leader
+- Filters invalid shreds before further processing
+- Uses multiple verification threads
+
+Source: `core/src/tvu.rs:339`
+
+### Window Service
+
+Manages shred assembly and repair:
+- Collects shreds into complete blocks
+- Detects missing shreds
+- Initiates repair requests for gaps
+- Handles ancestor hashes for fork validation
+- Manages duplicate slot detection
+
+Source: `core/src/tvu.rs:368`
+
+### Replay Stage
+
+Executes and validates blocks:
+- Replays transactions from assembled blocks
+- Maintains fork state and bank hierarchy
+- Implements fork choice logic
+- Generates votes on valid blocks
+- Handles rollback on invalid forks
+- Coordinates with consensus (Tower)
+
+Source: `core/src/tvu.rs:557`
+
+### Retransmit Stage
+
+Propagates shreds to other validators:
+- Implements Turbine protocol for block propagation
+- Uses erasure coding for fault tolerance
+- Organizes validators into a tree structure
+- Forwards shreds to designated neighbors
+- Optimizes for network topology
+
+Source: `core/src/tvu.rs:349`
+
+## Supporting Services
+
+### Cluster Info Vote Listener
+
+Processes votes from gossip:
+- Receives votes via gossip network
+- Verifies vote signatures
+- Tracks voting patterns
+- Feeds votes into consensus
+
+Source: `core/src/tpu.rs:289`
+
+### Voting Service
+
+Sends validator votes to the network:
+- Creates vote transactions
+- Signs votes with validator key
+- Submits to RPC or broadcasts directly
+- Manages vote account state
+
+Source: `core/src/tvu.rs:528`
+
+### Staked Nodes Updater
+
+Maintains current stake distribution:
+- Updates stake weights from epoch changes
+- Provides stake info to QUIC QoS
+- Supports stake-weighted operations
+
+Source: `core/src/tpu.rs:175`
+
+### Cost Update Service
+
+Tracks transaction costs for fee market:
+- Updates cost model parameters
+- Feeds prioritization fee cache
+- Supports dynamic fee adjustments
+
+Source: `core/src/tvu.rs:553`
+
+## Process Lifecycle
+
+The validator follows this lifecycle:
+
+1. **Initialization** - Load configuration, keypairs, and genesis
+2. **Blockstore Setup** - Initialize or load existing ledger
+3. **Service Start** - Launch all pipeline stages
+4. **Gossip Join** - Connect to cluster via gossip
+5. **Sync** - Replay ledger and catch up to cluster
+6. **Active Operation** - Process transactions and vote on blocks
+7. **Graceful Shutdown** - Clean exit on signal
+
+Source: `core/src/validator.rs:1`
+
+## Resource Management
+
+Validators carefully manage system resources:
+
+- **File Descriptors** - Adjusted for high connection counts
+- **Memory** - Bounded channels prevent memory exhaustion
+- **CPU** - Thread pools sized for available cores
+- **Disk** - Automatic ledger pruning to manage storage
+- **Network** - Port ranges for multiple services
+
+Source: `core/src/validator.rs:26`
+
+<Tip>
+Proper resource limits are critical for validator stability. The validator automatically adjusts many limits, but operators should monitor resource usage, especially disk space.
+</Tip>
+
+## Next Steps
+
+- Learn about [Tower BFT consensus](./consensus)
+- Understand the [Sealevel runtime](./runtime)
+- Explore [cluster participation](./clusters)

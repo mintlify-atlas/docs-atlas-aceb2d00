@@ -1,0 +1,590 @@
+---
+title: Managing Vote Accounts with Solana CLI
+description: Create and manage Solana validator vote accounts using the CLI, including vote account creation, authorization updates, commission configuration, and withdrawal operations.
+---
+
+## Overview
+
+Vote accounts are specialized accounts used by validators to vote on blocks and earn rewards. Each validator requires a vote account to participate in consensus. Vote accounts:
+
+- Track validator votes on blocks
+- Accumulate voting credits that determine rewards
+- Store validator commission rates
+- Hold validator identity and authorization keys
+- Accumulate rewards that can be withdrawn
+
+<Warning>
+Vote accounts are critical infrastructure for validators. Improper management can result in lost rewards or validator downtime.
+</Warning>
+
+## Prerequisites
+
+- [Solana CLI tools installed](/cli/installation)
+- Validator identity keypair
+- Funded wallet for rent and fees
+- [Cluster configured](/cli/cluster-selection)
+
+## Create a Vote Account
+
+Creating a vote account requires:
+- Vote account keypair (the account itself)
+- Validator identity keypair (links vote account to validator)
+- Authorized withdrawer (can withdraw accumulated rewards)
+
+<Steps>
+  <Step title="Generate vote account keypair">
+    ```bash
+    solana-keygen new -o vote-account.json
+    ```
+  </Step>
+
+  <Step title="Create vote account">
+    ```bash
+    solana create-vote-account vote-account.json identity-keypair.json authorized-withdrawer-pubkey
+    ```
+    
+    Full example with all parameters:
+    ```bash
+    solana create-vote-account vote-account.json ~/validator-keypair.json \
+        ~/withdrawer-keypair.json \
+        --commission 10 \
+        --authorized-voter ~/validator-keypair.json \
+        --fee-payer ~/fee-payer.json
+    ```
+  </Step>
+
+  <Step title="Verify creation">
+    Check the vote account:
+    
+    ```bash
+    solana vote-account <VOTE_ACCOUNT_ADDRESS>
+    ```
+    
+    Output:
+    ```text
+    Account Balance: 0.02685864 SOL
+    Validator Identity: GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV
+    Authorized Voter: GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV
+    Authorized Withdrawer: EXU95vqs93yPeCeAU7mPPu6HbRUmTFPEiGug9oCdvQ5F
+    Commission: 10%
+    Epoch Credits: 147462
+    Last Vote: 98765432
+    Root Slot: 98765000
+    ```
+  </Step>
+</Steps>
+
+### Commission Configuration
+
+#### Legacy VoteInit (v1)
+
+For VoteInit v1, set commission as a percentage (0-100):
+
+```bash
+solana create-vote-account vote-account.json identity.json withdrawer.json \
+    --commission 10
+```
+
+Commission defaults to 100% if not specified.
+
+<Note>
+The `--commission` flag is only valid for VoteInit v1 and **cannot** be used with `--use-v2-instruction`.
+</Note>
+
+#### VoteInitV2 (SIMD-0464)
+
+For VoteInitV2, configure separate commission rates for inflation rewards and block revenue:
+
+```bash
+solana create-vote-account vote-account.json identity.json withdrawer.json \
+    --use-v2-instruction \
+    --inflation-rewards-commission-bps 1000 \
+    --inflation-rewards-collector collector-pubkey \
+    --block-revenue-commission-bps 500 \
+    --block-revenue-collector collector-pubkey
+```
+
+Parameters:
+- `--inflation-rewards-commission-bps` - Commission in basis points (0-10000), where 100 bps = 1% [default: 10000 (100%)]
+- `--inflation-rewards-collector` - Account to collect inflation commission [default: vote account]
+- `--block-revenue-commission-bps` - Block revenue commission in basis points [default: 10000 (100%)]
+- `--block-revenue-collector` - Account to collect block revenue [default: identity account]
+
+<Info>
+After SIMD-0464 feature activation, the CLI auto-detects which instruction version to use. Use `--use-v2-instruction` to force VoteInitV2 or when signing offline transactions.
+</Info>
+
+### Authorities
+
+#### Authorized Voter
+
+The authorized voter signs votes on behalf of the validator. Defaults to the validator identity pubkey if not specified:
+
+```bash
+solana create-vote-account vote-account.json identity.json withdrawer.json \
+    --authorized-voter voter-pubkey
+```
+
+#### Authorized Withdrawer
+
+The authorized withdrawer can withdraw accumulated rewards and update certain vote account parameters:
+
+```bash
+solana create-vote-account vote-account.json identity.json withdrawer.json
+```
+
+<Warning>
+Never set the authorized withdrawer to the same address as the validator identity or vote account unless using `--allow-unsafe-authorized-withdrawer`. This is unsafe and should be avoided.
+</Warning>
+
+Override safety check:
+```bash
+solana create-vote-account vote-account.json identity.json identity.json \
+    --allow-unsafe-authorized-withdrawer
+```
+
+### Derived Address
+
+Create vote account at a derived address:
+
+```bash
+solana create-vote-account vote-account.json identity.json withdrawer.json \
+    --seed "validator-1"
+```
+
+The resulting account address will be derived from the vote account pubkey and seed.
+
+## Update Vote Account Authority
+
+Vote accounts have two authorities that can be updated: authorized voter and authorized withdrawer.
+
+### Update Authorized Voter
+
+Change the authorized voter (keypair that signs votes):
+
+```bash
+solana vote-authorize-voter <VOTE_ACCOUNT_ADDRESS> <AUTHORIZED_KEYPAIR> <NEW_AUTHORIZED_PUBKEY>
+```
+
+Example:
+```bash
+solana vote-authorize-voter 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF \
+    ~/current-voter.json \
+    8nP3jDvPwhTzv8VpE4pRi8pJGhhtC5T9kB8aU9Ltzfsg
+```
+
+### Update Authorized Withdrawer
+
+Change the authorized withdrawer:
+
+```bash
+solana vote-authorize-withdrawer <VOTE_ACCOUNT_ADDRESS> <AUTHORIZED_KEYPAIR> <NEW_AUTHORIZED_PUBKEY>
+```
+
+Example:
+```bash
+solana vote-authorize-withdrawer 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF \
+    ~/current-withdrawer.json \
+    EXU95vqs93yPeCeAU7mPPu6HbRUmTFPEiGug9oCdvQ5F
+```
+
+### Checked Authorization (Safer)
+
+Use "checked" versions that require the new authority to sign, preventing typos:
+
+#### Update Voter (Checked)
+
+```bash
+solana vote-authorize-voter-checked <VOTE_ACCOUNT_ADDRESS> <AUTHORIZED_KEYPAIR> <NEW_AUTHORIZED_KEYPAIR>
+```
+
+Example:
+```bash
+solana vote-authorize-voter-checked 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF \
+    ~/current-voter.json \
+    ~/new-voter.json
+```
+
+For BLS key derivation (SIMD-0387), force v2 instruction:
+```bash
+solana vote-authorize-voter-checked vote-account current-voter.json new-voter.json \
+    --use-v2-instruction
+```
+
+#### Update Withdrawer (Checked)
+
+```bash
+solana vote-authorize-withdrawer-checked <VOTE_ACCOUNT_ADDRESS> <AUTHORIZED_KEYPAIR> <NEW_AUTHORIZED_KEYPAIR>
+```
+
+Example:
+```bash
+solana vote-authorize-withdrawer-checked 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF \
+    ~/current-withdrawer.json \
+    ~/new-withdrawer.json
+```
+
+## Update Validator Identity
+
+Change the validator identity associated with a vote account:
+
+```bash
+solana vote-update-validator <VOTE_ACCOUNT_ADDRESS> <NEW_IDENTITY_KEYPAIR> <AUTHORIZED_WITHDRAWER_KEYPAIR>
+```
+
+Example:
+```bash
+solana vote-update-validator 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF \
+    ~/new-validator-identity.json \
+    ~/withdrawer.json
+```
+
+<Warning>
+Changing validator identity is a critical operation. Ensure the new identity keypair is correct and backed up before proceeding.
+</Warning>
+
+## Update Commission
+
+Change the vote account commission rate:
+
+```bash
+solana vote-update-commission <VOTE_ACCOUNT_ADDRESS> <NEW_COMMISSION> <AUTHORIZED_WITHDRAWER_KEYPAIR>
+```
+
+Example (set commission to 5%):
+```bash
+solana vote-update-commission 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF \
+    5 \
+    ~/withdrawer.json
+```
+
+Commission range: 0-100 (percentage)
+
+<Note>
+Commission changes take effect at the beginning of the next epoch.
+</Note>
+
+## Withdraw from Vote Account
+
+Withdraw accumulated rewards from a vote account:
+
+```bash
+solana withdraw-from-vote-account <VOTE_ACCOUNT_ADDRESS> <RECIPIENT_ADDRESS> <AMOUNT> \
+    --authorized-withdrawer <KEYPAIR>
+```
+
+Example:
+```bash
+solana withdraw-from-vote-account 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF \
+    EXU95vqs93yPeCeAU7mPPu6HbRUmTFPEiGug9oCdvQ5F \
+    10.5 \
+    --authorized-withdrawer ~/withdrawer.json
+```
+
+This withdraws 10.5 SOL to the recipient address.
+
+### Withdraw All
+
+Withdraw all available funds:
+
+```bash
+solana withdraw-from-vote-account vote-account recipient ALL \
+    --authorized-withdrawer withdrawer.json
+```
+
+<Note>
+Vote accounts must maintain a rent-exempt balance. The maximum withdrawal is account balance minus rent-exempt minimum.
+</Note>
+
+## Query Vote Account Information
+
+### View Vote Account Details
+
+```bash
+solana vote-account <VOTE_ACCOUNT_ADDRESS>
+```
+
+Detailed output:
+```text
+Account Balance: 2.50685864 SOL
+Validator Identity: GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV
+Authorized Voter: GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV
+Authorized Withdrawer: EXU95vqs93yPeCeAU7mPPu6HbRUmTFPEiGug9oCdvQ5F
+Commission: 10%
+Root Slot: 98765000
+Recent Timestamp: 2026-02-28T04:22:15Z
+Epoch Credits: 147462
+Last Vote: 98765432
+```
+
+### List All Validators
+
+View all validators and their vote accounts:
+
+```bash
+solana validators
+```
+
+Output:
+```text
+Identity                                     | Vote Account                                 | Commission | Last Vote    | Root Slot | Skip Rate | Stake
+---------------------------------------------+----------------------------------------------+------------+--------------+-----------+-----------+-------------------
+GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV | 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF | 10%        | 98765432     | 98765000  | 0.00%     | 1234567.890 SOL
+```
+
+Filter by specific validator:
+```bash
+solana validators --filter <IDENTITY_PUBKEY>
+```
+
+### Show Delinquent Validators
+
+List validators that haven't voted recently:
+
+```bash
+solana validators --delinquent
+```
+
+### Voting History
+
+View epoch voting history:
+
+```bash
+solana vote-account <VOTE_ACCOUNT_ADDRESS> --lamports
+```
+
+Includes detailed credit history across epochs.
+
+## Close Vote Account
+
+Closing a vote account reclaims the rent-exempt SOL:
+
+```bash
+solana close-vote-account <VOTE_ACCOUNT_ADDRESS> <RECIPIENT_ADDRESS> \
+    --authorized-withdrawer <KEYPAIR>
+```
+
+Example:
+```bash
+solana close-vote-account 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF \
+    EXU95vqs93yPeCeAU7mPPu6HbRUmTFPEiGug9oCdvQ5F \
+    --authorized-withdrawer ~/withdrawer.json
+```
+
+<Warning>
+**Prerequisites for closing:**
+- Vote account must have no delegated stake
+- Validator must be stopped
+- All stake accounts must be deactivated and withdrawn
+</Warning>
+
+## Vote Account Best Practices
+
+### Security
+
+1. **Separate Keys**: Use different keypairs for identity, voter, and withdrawer
+2. **Hardware Wallet**: Store withdrawer authority on hardware wallet
+3. **Backup**: Maintain secure backups of all keypairs
+4. **Checked Operations**: Use `-checked` variants for authority updates
+
+### Operational
+
+1. **Monitor Balance**: Regularly check vote account balance
+2. **Track Credits**: Monitor epoch credits to ensure validator is voting
+3. **Commission Strategy**: Set competitive commission rates
+4. **Withdraw Regularly**: Periodically withdraw accumulated rewards
+
+### Recommended Authority Setup
+
+```bash
+# Generate keys
+solana-keygen new -o validator-identity.json
+solana-keygen new -o vote-keypair.json
+solana-keygen new -o withdrawer.json  # Store on hardware wallet
+
+# Create vote account
+solana create-vote-account vote-keypair.json validator-identity.json withdrawer-pubkey \
+    --commission 10 \
+    --authorized-voter validator-identity.json
+```
+
+Key roles:
+- **Identity**: Hot wallet, signs votes, used by validator
+- **Withdrawer**: Cold wallet, only for withdrawals and critical updates
+- **Voter**: Typically same as identity for convenience
+
+## Common Vote Account Operations
+
+### Initial Setup
+
+<Steps>
+  <Step title="Generate keypairs">
+    ```bash
+    solana-keygen new -o validator-identity.json
+    solana-keygen new -o vote-account.json
+    solana-keygen new -o authorized-withdrawer.json
+    ```
+  </Step>
+
+  <Step title="Fund validator identity">
+    ```bash
+    # On devnet
+    solana airdrop 10 validator-identity.json
+    
+    # On mainnet
+    # Transfer SOL from another wallet
+    ```
+  </Step>
+
+  <Step title="Create vote account">
+    ```bash
+    solana create-vote-account vote-account.json \
+        validator-identity.json \
+        authorized-withdrawer-pubkey \
+        --commission 10
+    ```
+  </Step>
+
+  <Step title="Configure validator">
+    Add vote account to validator startup command:
+    ```bash
+    solana-validator \
+        --identity validator-identity.json \
+        --vote-account vote-account-pubkey \
+        --rpc-port 8899 \
+        ...
+    ```
+  </Step>
+</Steps>
+
+### Commission Update
+
+```bash
+# Check current commission
+solana vote-account <VOTE_ACCOUNT_ADDRESS> | grep Commission
+
+# Update commission
+solana vote-update-commission <VOTE_ACCOUNT_ADDRESS> 5 ~/withdrawer.json
+
+# Verify update
+solana vote-account <VOTE_ACCOUNT_ADDRESS> | grep Commission
+```
+
+### Reward Withdrawal
+
+```bash
+# Check balance
+solana balance <VOTE_ACCOUNT_ADDRESS>
+
+# Withdraw rewards
+solana withdraw-from-vote-account <VOTE_ACCOUNT_ADDRESS> <RECIPIENT> 10 \
+    --authorized-withdrawer ~/withdrawer.json
+
+# Verify withdrawal
+solana balance <VOTE_ACCOUNT_ADDRESS>
+```
+
+## Troubleshooting
+
+### Vote Account Not Voting
+
+Check:
+1. Validator is running: `solana-validator --ledger /path/to/ledger monitor`
+2. Vote account is correctly configured in validator
+3. Identity keypair matches vote account's authorized voter
+4. Validator has sufficient SOL for transaction fees
+
+### Authority Mismatch
+
+Verify authorities:
+```bash
+solana vote-account <VOTE_ACCOUNT_ADDRESS>
+```
+
+Compare:
+- Authorized Voter vs validator identity
+- Authorized Withdrawer vs your withdrawer keypair
+
+### Cannot Withdraw
+
+Reasons:
+- Insufficient balance (must maintain rent-exempt minimum)
+- Wrong withdrawer authority
+- Vote account has active stake (must be removed first)
+
+### Commission Not Updating
+
+Commission changes take effect at the **next epoch boundary**. Check:
+```bash
+solana epoch-info
+```
+
+Wait until the epoch completes, then verify:
+```bash
+solana vote-account <VOTE_ACCOUNT_ADDRESS>
+```
+
+## Monitoring Vote Accounts
+
+### Check Vote Status
+
+```bash
+# Last vote slot
+solana vote-account <VOTE_ACCOUNT_ADDRESS> | grep "Last Vote"
+
+# Current slot
+solana slot
+
+# Compare - last vote should be close to current slot
+```
+
+### Track Epoch Credits
+
+```bash
+solana vote-account <VOTE_ACCOUNT_ADDRESS> | grep "Epoch Credits"
+```
+
+Credits should increase each epoch.
+
+### Monitor Skip Rate
+
+```bash
+solana validators | grep <IDENTITY_PUBKEY>
+```
+
+Look at the "Skip Rate" column. Lower is better (ideally < 10%).
+
+## Advanced Operations
+
+### Offline Transaction Signing
+
+For enhanced security, sign vote account transactions offline:
+
+```bash
+# Generate transaction offline
+solana vote-update-commission <VOTE_ACCOUNT_ADDRESS> 5 ~/withdrawer.json \
+    --sign-only \
+    --blockhash <RECENT_BLOCKHASH> \
+    --nonce <NONCE_ACCOUNT> \
+    --nonce-authority <NONCE_AUTHORITY>
+
+# Submit signed transaction online
+solana vote-update-commission <VOTE_ACCOUNT_ADDRESS> 5 ~/withdrawer.json \
+    --signer <SIGNATURE>
+```
+
+### Multi-Signature Setup
+
+Use multi-signature accounts for critical vote account authorities. See program documentation for setup details.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Stake Accounts" icon="coins" href="/cli/stake-accounts">
+    Delegate stake to your validator
+  </Card>
+  
+  <Card title="CLI Overview" icon="terminal" href="/cli/overview">
+    Explore all CLI commands
+  </Card>
+</CardGroup>

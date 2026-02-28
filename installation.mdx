@@ -1,0 +1,278 @@
+---
+title: Installation
+description: Install Agave validator software from source or prebuilt binaries. Includes instructions for Rust toolchain setup and system dependencies on Ubuntu and Fedora.
+---
+
+# Installation
+
+There are multiple ways to install Agave depending on your preferred workflow:
+
+- Use the Solana Install Tool (simplest option)
+- Download prebuilt binaries
+- Build from source
+- Use Homebrew (macOS & Linux)
+
+## Quick Install with Solana Install Tool
+
+### macOS & Linux
+
+The fastest way to get started is using the Anza release installer:
+
+```bash
+sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+```
+
+You can replace `stable` with a specific release version or use one of the symbolic channel names: `stable`, `beta`, or `edge`.
+
+**Expected output:**
+
+```text
+downloading stable installer
+Configuration: /home/solana/.config/solana/install/config.yml
+Active release directory: /home/solana/.local/share/solana/install/active_release
+* Release version: stable
+* Release URL: https://github.com/anza-xyz/agave/releases/download/...
+Update successful
+```
+
+**Update your PATH:**
+
+If prompted, add the Solana programs to your PATH:
+
+```bash
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+```
+
+**Verify installation:**
+
+```bash
+solana --version
+```
+
+<Note>
+After installation, use `agave-install update` to easily update to newer versions.
+</Note>
+
+### Windows
+
+<Steps>
+  <Step title="Open Command Prompt as Administrator">
+    Search for Command Prompt in the Windows search bar, right-click, and select "Open as Administrator".
+  </Step>
+  
+  <Step title="Download the installer">
+    ```bash
+    cmd /c "curl https://release.anza.xyz/stable/agave-install-init-x86_64-pc-windows-msvc.exe --output C:\agave-install-tmp\agave-install-init.exe --create-dirs"
+    ```
+  </Step>
+  
+  <Step title="Run the installer">
+    ```bash
+    C:\agave-install-tmp\agave-install-init.exe stable
+    ```
+    
+    If you see a security popup, allow the program to run.
+  </Step>
+  
+  <Step title="Verify installation">
+    Close the admin command prompt, open a new command prompt as a normal user, and verify:
+    
+    ```bash
+    solana --version
+    ```
+  </Step>
+</Steps>
+
+## Download Prebuilt Binaries
+
+If you prefer not to use `agave-install`, you can manually download and install prebuilt binaries.
+
+<Warning>
+Prebuilt binaries require AVX2 instruction support. If your CPU doesn't support AVX2, you'll need to build from source.
+</Warning>
+
+### Linux
+
+Download the latest release from [GitHub releases](https://github.com/anza-xyz/agave/releases/latest):
+
+```bash
+wget https://github.com/anza-xyz/agave/releases/latest/download/solana-release-x86_64-unknown-linux-gnu.tar.bz2
+tar jxf solana-release-x86_64-unknown-linux-gnu.tar.bz2
+cd solana-release/
+export PATH=$PWD/bin:$PATH
+```
+
+### macOS
+
+```bash
+curl -LO https://github.com/anza-xyz/agave/releases/latest/download/solana-release-x86_64-apple-darwin.tar.bz2
+tar jxf solana-release-x86_64-apple-darwin.tar.bz2
+cd solana-release/
+export PATH=$PWD/bin:$PATH
+```
+
+### Windows
+
+Download `solana-release-x86_64-pc-windows-msvc.tar.bz2` from [GitHub releases](https://github.com/anza-xyz/agave/releases/latest) and extract using WinZip or similar.
+
+Then in Command Prompt:
+
+```bash
+cd solana-release/
+set PATH=%cd%/bin;%PATH%
+```
+
+## Build From Source
+
+Building from source gives you the most flexibility and is required if:
+- Your platform doesn't have prebuilt binaries
+- Your CPU doesn't support AVX2
+- You want to build a release version for production use
+- You're contributing to Agave development
+
+<Steps>
+  <Step title="Install Rust toolchain">
+    Install Rust, Cargo, and rustfmt:
+    
+    ```bash
+    curl https://sh.rustup.rs -sSf | sh
+    source $HOME/.cargo/env
+    rustup component add rustfmt
+    ```
+    
+    The `rust-toolchain.toml` file in the repository pins a specific Rust version. Cargo will automatically install the correct version if needed.
+  </Step>
+  
+  <Step title="Install system dependencies">
+    <Note>
+    System dependencies are required for building Agave. Choose the commands for your operating system.
+    </Note>
+    
+    **Ubuntu / Debian:**
+    
+    ```bash
+    sudo apt-get update
+    sudo apt-get install libssl-dev libudev-dev pkg-config zlib1g-dev llvm clang cmake make libprotobuf-dev protobuf-compiler libclang-dev
+    ```
+    
+    **Fedora / RHEL:**
+    
+    ```bash
+    sudo dnf install openssl-devel systemd-devel pkg-config zlib-devel llvm clang cmake make protobuf-devel protobuf-compiler perl-core libclang-devel
+    ```
+    
+    **macOS:**
+    
+    First install [Homebrew](https://brew.sh/), then:
+    
+    ```bash
+    brew install pkg-config libudev protobuf llvm coreutils
+    ```
+    
+    Follow the instructions about PATH configuration at the end of the brew install command.
+    
+    **Windows:**
+    
+    - Install [Build Tools for Visual Studio](https://visualstudio.microsoft.com/downloads/) (2019 or later) with C++ build tools
+    - Install [LLVM](https://releases.llvm.org/download.html)
+    - Install [Protocol Buffers compiler](https://github.com/protocolbuffers/protobuf/releases) and add to PATH
+    
+    <Warning>
+    Windows 10/11 users may need [Windows Subsystem for Linux (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) to build from source successfully.
+    </Warning>
+  </Step>
+  
+  <Step title="Download the source code">
+    Clone the Agave repository:
+    
+    ```bash
+    git clone https://github.com/anza-xyz/agave.git
+    cd agave
+    ```
+  </Step>
+  
+  <Step title="Build Agave">
+    For development (debug build):
+    
+    ```bash
+    ./cargo build
+    ```
+    
+    <Warning>
+    Debug builds are **not suitable for running testnet or mainnet validators**. Use the release build for production.
+    </Warning>
+    
+    **For production use (release build):**
+    
+    ```bash
+    ./scripts/cargo-install-all.sh .
+    export PATH=$PWD/bin:$PATH
+    ```
+    
+    This builds optimized binaries and installs them to the `bin` directory.
+  </Step>
+  
+  <Step title="Verify installation">
+    Confirm the binaries are working:
+    
+    ```bash
+    solana --version
+    agave-validator --version
+    ```
+  </Step>
+</Steps>
+
+## Use Homebrew
+
+For macOS and Linux users with [Homebrew](https://brew.sh/) installed:
+
+```bash
+brew install solana
+```
+
+Verify installation:
+
+```bash
+solana --version
+```
+
+<Note>
+The Homebrew formula is updated after each Solana release, but may occasionally lag behind the latest version. See the [Homebrew formula](https://github.com/Homebrew/homebrew-core/blob/HEAD/Formula/s/solana.rb) for details.
+</Note>
+
+## Platform Notes
+
+### Supported Platforms
+
+- **Ubuntu 24.04** (recommended for production)
+- **Ubuntu 20.04** (prebuilt binaries available, support ending May 2025)
+- **Fedora / RHEL**
+- **macOS** (build from source required)
+- **Windows** (build from source required)
+
+### AVX2 Requirement
+
+Prebuilt binaries require CPUs with AVX2 instruction support. To check if your CPU supports AVX2:
+
+**Linux:**
+```bash
+lscpu | grep avx2
+```
+
+**macOS:**
+```bash
+sysctl -a | grep machdep.cpu.features | grep AVX2
+```
+
+If AVX2 is not supported, build from source without the AVX2 requirement.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Start a local test validator and verify your installation
+  </Card>
+  <Card title="CLI Introduction" icon="terminal" href="/cli/overview">
+    Learn about CLI conventions and basic commands
+  </Card>
+</CardGroup>

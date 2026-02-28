@@ -1,0 +1,564 @@
+---
+title: Managing Stake Accounts with Solana CLI
+description: Create, delegate, and manage stake accounts using the Solana CLI. Learn how to stake SOL tokens, withdraw rewards, and perform stake account operations.
+---
+
+## Overview
+
+Stake accounts allow you to delegate SOL tokens to validators, helping secure the network and earning rewards. When you stake tokens, you give validators more influence in determining valid blocks, and in return, you earn newly generated SOL periodically as rewards.
+
+<Info>
+For a comprehensive overview of staking concepts, see the [Staking and Inflation FAQ](https://solana.com/staking) and [Staking documentation](https://solana.com/docs/references/staking/stake-accounts).
+</Info>
+
+## Prerequisites
+
+- [Solana CLI tools installed](/cli/installation)
+- A funded wallet with SOL tokens
+- [Cluster configured](/cli/cluster-selection) (Devnet recommended for testing)
+
+## Create a Stake Account
+
+Creating a stake account involves generating a keypair for the account address and transferring tokens into it.
+
+<Steps>
+  <Step title="Generate stake account keypair">
+    Create a keypair for the new stake account:
+    
+    ```bash
+    solana-keygen new --no-passphrase -o stake-account.json
+    ```
+    
+    Output:
+    ```text
+    Generating a new keypair
+    
+    For added security, enter a BIP39 passphrase
+    
+    NOTE! This passphrase improves security of the recovery seed phrase NOT the
+    keypair file itself, which is stored as insecure plain text
+    
+    BIP39 Passphrase (empty for none):
+    
+    Wrote new keypair to stake-account.json
+    ================================================================================
+    pubkey: GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV
+    ================================================================================
+    Save this seed phrase and your BIP39 passphrase to recover your new keypair:
+    [seed phrase displayed here]
+    ================================================================================
+    ```
+    
+    <Note>
+    Save the public key (pubkey) - you'll need it to reference this stake account.
+    </Note>
+  </Step>
+
+  <Step title="Create the stake account">
+    Transfer SOL into a new stake account:
+    
+    ```bash
+    solana create-stake-account --from <KEYPAIR> stake-account.json <AMOUNT> \
+        --stake-authority <KEYPAIR> --withdraw-authority <KEYPAIR> \
+        --fee-payer <KEYPAIR>
+    ```
+    
+    Example:
+    ```bash
+    solana create-stake-account --from ~/my-wallet.json stake-account.json 5 \
+        --stake-authority ~/my-wallet.json --withdraw-authority ~/my-wallet.json \
+        --fee-payer ~/my-wallet.json
+    ```
+    
+    This creates a stake account with 5 SOL.
+  </Step>
+
+  <Step title="Discard keypair file">
+    The `stake-account.json` file can now be safely deleted. All future operations use the stake account address (pubkey) and the authority keypairs.
+  </Step>
+
+  <Step title="View stake account">
+    Check the new stake account:
+    
+    ```bash
+    solana stake-account <STAKE_ACCOUNT_ADDRESS>
+    ```
+    
+    Output:
+    ```text
+    Total Stake: 5000 SOL
+    Stake account is undelegated
+    Stake Authority: EXU95vqs93yPeCeAU7mPPu6HbRUmTFPEiGug9oCdvQ5F
+    Withdraw Authority: EXU95vqs93yPeCeAU7mPPu6HbRUmTFPEiGug9oCdvQ5F
+    ```
+  </Step>
+</Steps>
+
+### Use ALL Keyword
+
+Transfer all available SOL from the funding account:
+
+```bash
+solana create-stake-account --from <KEYPAIR> stake-account.json ALL \
+    --stake-authority <KEYPAIR> --withdraw-authority <KEYPAIR> \
+    --fee-payer <KEYPAIR>
+```
+
+## Stake and Withdraw Authorities
+
+Stake accounts have two types of authorities:
+
+- **Stake Authority** - Can delegate stake, deactivate stake, and split stake accounts
+- **Withdraw Authority** - Can withdraw tokens from the stake account
+
+### Set Authorities During Creation
+
+Specify authorities when creating the account:
+
+```bash
+solana create-stake-account --from ~/funding.json stake-account.json 100 \
+    --stake-authority ~/stake-authority.json \
+    --withdraw-authority ~/withdraw-authority.json \
+    --fee-payer ~/funding.json
+```
+
+### Change Stake Authority
+
+Update the stake authority after creation:
+
+```bash
+solana stake-authorize <STAKE_ACCOUNT_ADDRESS> \
+    --stake-authority <KEYPAIR> --new-stake-authority <PUBKEY> \
+    --fee-payer <KEYPAIR>
+```
+
+Example:
+```bash
+solana stake-authorize GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV \
+    --stake-authority ~/old-authority.json \
+    --new-stake-authority 8nP3jDvPwhTzv8VpE4pRi8pJGhhtC5T9kB8aU9Ltzfsg \
+    --fee-payer ~/fee-payer.json
+```
+
+### Change Withdraw Authority
+
+Update the withdraw authority:
+
+```bash
+solana stake-authorize <STAKE_ACCOUNT_ADDRESS> \
+    --withdraw-authority <KEYPAIR> --new-withdraw-authority <PUBKEY> \
+    --fee-payer <KEYPAIR>
+```
+
+## Delegate Stake
+
+Delegating stake assigns your tokens to a validator, giving them voting weight and earning you rewards.
+
+<Steps>
+  <Step title="Find a validator">
+    List all validators and their vote accounts:
+    
+    ```bash
+    solana validators
+    ```
+    
+    Output:
+    ```text
+    Identity                                     | Vote Account                                 | Commission | Last Vote    | Stake
+    ---------------------------------------------+----------------------------------------------+------------+--------------+-------------------
+    8nP3jDvPwhTzv8VpE4pRi8pJGhhtC5T9kB8aU9Ltzfsg | 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF | 10%        | 98765432     | 1234567.890 SOL
+    ```
+    
+    The first column is the validator identity, the second is the vote account address. Choose a validator and copy its vote account address.
+  </Step>
+
+  <Step title="Delegate to validator">
+    Delegate your stake account to the chosen validator:
+    
+    ```bash
+    solana delegate-stake --stake-authority <KEYPAIR> <STAKE_ACCOUNT_ADDRESS> <VOTE_ACCOUNT_ADDRESS> \
+        --fee-payer <KEYPAIR>
+    ```
+    
+    Example:
+    ```bash
+    solana delegate-stake --stake-authority ~/my-wallet.json \
+        GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV \
+        9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF \
+        --fee-payer ~/my-wallet.json
+    ```
+  </Step>
+
+  <Step title="Verify delegation">
+    Check the stake account to confirm delegation:
+    
+    ```bash
+    solana stake-account <STAKE_ACCOUNT_ADDRESS>
+    ```
+    
+    Output:
+    ```text
+    Total Stake: 5000 SOL
+    Credits Observed: 147462
+    Delegated Stake: 4999.99771712 SOL
+    Delegated Vote Account Address: 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF
+    Stake activates starting from epoch: 42
+    Stake Authority: EXU95vqs93yPeCeAU7mPPu6HbRUmTFPEiGug9oCdvQ5F
+    Withdraw Authority: EXU95vqs93yPeCeAU7mPPu6HbRUmTFPEiGug9oCdvQ5F
+    ```
+    
+    Note the "Delegated Vote Account Address" and "Stake activates starting from epoch" fields.
+  </Step>
+</Steps>
+
+<Info>
+Stake activation is not immediate. It takes effect at the beginning of the next epoch. Epochs typically last 2-3 days.
+</Info>
+
+## Deactivate Stake
+
+To undelegate stake (stop staking with a validator), deactivate the stake account.
+
+```bash
+solana deactivate-stake --stake-authority <KEYPAIR> <STAKE_ACCOUNT_ADDRESS> \
+    --fee-payer <KEYPAIR>
+```
+
+Example:
+```bash
+solana deactivate-stake --stake-authority ~/my-wallet.json \
+    GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV \
+    --fee-payer ~/my-wallet.json
+```
+
+### Deactivation with Derived Address
+
+If the stake account was created at a derived address (see [Derived Addresses](#derived-stake-account-addresses)), include the seed:
+
+```bash
+solana deactivate-stake --stake-authority <KEYPAIR> --seed <STRING> <STAKE_ACCOUNT_ADDRESS> \
+    --fee-payer <KEYPAIR>
+```
+
+### Deactivate from Delinquent Validator
+
+Force deactivation from a delinquent (non-voting) validator:
+
+```bash
+solana deactivate-stake --stake-authority <KEYPAIR> --delinquent <STAKE_ACCOUNT_ADDRESS> \
+    --fee-payer <KEYPAIR>
+```
+
+<Warning>
+Stake takes several epochs to "cool down" after deactivation. You cannot redelegate or withdraw until the cool-down period completes.
+</Warning>
+
+## Withdraw Stake
+
+Withdraw tokens from a stake account to another account.
+
+```bash
+solana withdraw-stake --withdraw-authority <KEYPAIR> <STAKE_ACCOUNT_ADDRESS> <RECIPIENT_ADDRESS> <AMOUNT> \
+    --fee-payer <KEYPAIR>
+```
+
+Example:
+```bash
+solana withdraw-stake --withdraw-authority ~/my-wallet.json \
+    GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV \
+    8nP3jDvPwhTzv8VpE4pRi8pJGhhtC5T9kB8aU9Ltzfsg \
+    100 \
+    --fee-payer ~/my-wallet.json
+```
+
+This withdraws 100 SOL to the recipient address.
+
+### Withdrawal Amount Keywords
+
+**ALL** - Withdraw the maximum amount allowed:
+```bash
+solana withdraw-stake --withdraw-authority <KEYPAIR> <STAKE_ACCOUNT_ADDRESS> <RECIPIENT> ALL \
+    --fee-payer <KEYPAIR>
+```
+
+**AVAILABLE** - Withdraw only the currently withdrawable portion:
+```bash
+solana withdraw-stake --withdraw-authority <KEYPAIR> <STAKE_ACCOUNT_ADDRESS> <RECIPIENT> AVAILABLE \
+    --fee-payer <KEYPAIR>
+```
+
+<Note>
+The withdrawable amount depends on whether stake is active, cooling down, fully inactive, and any applicable lockups.
+</Note>
+
+## Split Stake
+
+Transfer part of a stake account to a new stake account. Useful for delegating to multiple validators while stake is active or cooling down.
+
+```bash
+solana split-stake --stake-authority <KEYPAIR> <STAKE_ACCOUNT_ADDRESS> <NEW_STAKE_ACCOUNT_KEYPAIR> <AMOUNT> \
+    --fee-payer <KEYPAIR>
+```
+
+Example:
+```bash
+solana-keygen new --no-passphrase -o new-stake.json
+solana split-stake --stake-authority ~/my-wallet.json \
+    GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV \
+    new-stake.json \
+    1000 \
+    --fee-payer ~/my-wallet.json
+```
+
+This moves 1000 SOL from the existing stake account to a new stake account.
+
+### Split Requirements
+
+- The split amount must be at least the cluster's minimum delegation (typically 1 SOL)
+- The new account must be rent-exempt
+- Both accounts will have the same authorities and delegation state
+
+### Specify Rent-Exempt Reserve
+
+When signing offline transactions, explicitly provide the rent-exempt amount:
+
+```bash
+solana split-stake --stake-authority <KEYPAIR> <STAKE_ACCOUNT_ADDRESS> <NEW_STAKE_ACCOUNT_KEYPAIR> <AMOUNT> \
+    --rent-exempt-reserve-sol <RENT_EXEMPT_AMOUNT> --fee-payer <KEYPAIR>
+```
+
+## Derived Stake Account Addresses
+
+For managing multiple stake accounts, derive addresses from a base keypair and seed instead of creating separate keypair files.
+
+### Create with Seed
+
+```bash
+solana create-stake-account --from <KEYPAIR> <STAKE_ACCOUNT_KEYPAIR> --seed <STRING> <AMOUNT> \
+    --stake-authority <PUBKEY> --withdraw-authority <PUBKEY> --fee-payer <KEYPAIR>
+```
+
+Example:
+```bash
+solana create-stake-account --from ~/my-wallet.json ~/base-keypair.json --seed "0" 100 \
+    --stake-authority ~/my-wallet.json --withdraw-authority ~/my-wallet.json \
+    --fee-payer ~/my-wallet.json
+```
+
+The `<STRING>` is an arbitrary string up to 32 bytes. Common practice is to use sequential numbers: "0", "1", "2", etc.
+
+### Calculate Derived Address
+
+Preview the derived address before creating:
+
+```bash
+solana create-address-with-seed --from <PUBKEY> <SEED_STRING> STAKE
+```
+
+Example:
+```bash
+solana create-address-with-seed --from EXU95vqs93yPeCeAU7mPPu6HbRUmTFPEiGug9oCdvQ5F "0" STAKE
+```
+
+Output:
+```text
+3F2KkdLLXJHBvYJnqDWwHqVh3aEqrKDjHb7Ws4qNxcJh
+```
+
+### Split to Derived Address
+
+Split stake to a derived address:
+
+```bash
+solana split-stake --stake-authority <KEYPAIR> <STAKE_ACCOUNT_ADDRESS> \
+    <BASE_KEYPAIR> --seed <STRING> <AMOUNT> \
+    --fee-payer <KEYPAIR>
+```
+
+## Check Stake Activation
+
+Monitor stake activation status:
+
+```bash
+solana stake-account <STAKE_ACCOUNT_ADDRESS>
+```
+
+Look for:
+- "Stake account is undelegated" - Not yet delegated
+- "Stake activates starting from epoch: N" - Will activate at epoch N
+- "Delegated Stake: X SOL" - Currently active stake amount
+
+### View All Stake Accounts
+
+List all stake accounts owned by a wallet:
+
+```bash
+solana stakes <WALLET_ADDRESS>
+```
+
+Output:
+```text
+Stake Account                                | Validator                                    | State     | Stake (SOL)
+---------------------------------------------+----------------------------------------------+-----------+-------------
+GKvqsuNcnwWqPzzuhLmGi4rzzh55FhJtGizkhHaEJqiV | 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF | active    | 5000.000000
+```
+
+## Stake Rewards
+
+Rewards are automatically added to your stake account balance each epoch. View accumulated rewards by checking your stake account balance over time.
+
+### Calculate Expected Rewards
+
+The reward rate depends on:
+- Total network stake
+- Inflation rate
+- Validator commission
+- Validator performance
+
+Typical annual percentage yield (APY) on Solana ranges from 5-7%.
+
+### Claim Rewards
+
+Rewards are **automatically** added to your stake account. No manual claiming required.
+
+To access rewards:
+1. Deactivate stake
+2. Wait for cool-down period
+3. Withdraw funds
+
+## Stake Account Management Strategies
+
+### Single Validator
+
+Simplest approach - delegate all stake to one validator:
+
+```bash
+# Create and delegate
+solana create-stake-account --from wallet.json stake.json 1000 \
+    --stake-authority wallet.json --withdraw-authority wallet.json
+solana delegate-stake --stake-authority wallet.json stake-address vote-address
+```
+
+### Multiple Validators
+
+Spread stake across multiple validators for diversification:
+
+<CodeGroup>
+```bash Validator 1
+solana create-stake-account --from wallet.json base.json --seed "0" 500 \
+    --stake-authority wallet.json --withdraw-authority wallet.json
+solana delegate-stake --stake-authority wallet.json stake-address-0 vote-address-1
+```
+
+```bash Validator 2
+solana create-stake-account --from wallet.json base.json --seed "1" 500 \
+    --stake-authority wallet.json --withdraw-authority wallet.json
+solana delegate-stake --stake-authority wallet.json stake-address-1 vote-address-2
+```
+</CodeGroup>
+
+### Redelegate Without Downtime
+
+Switch validators without unstaking:
+
+<Steps>
+  <Step title="Split stake account">
+    ```bash
+    solana split-stake --stake-authority wallet.json existing-stake new-stake.json 500
+    ```
+  </Step>
+
+  <Step title="Delegate to new validator">
+    ```bash
+    solana delegate-stake --stake-authority wallet.json new-stake-address new-vote-address
+    ```
+  </Step>
+
+  <Step title="Deactivate original (optional)">
+    ```bash
+    solana deactivate-stake --stake-authority wallet.json existing-stake
+    ```
+  </Step>
+</Steps>
+
+## Common Operations
+
+### Check Balance
+
+```bash
+solana balance <STAKE_ACCOUNT_ADDRESS>
+```
+
+### Merge Stake Accounts
+
+Merge two stake accounts (must be delegated to same validator or both inactive):
+
+```bash
+solana stake-merge <STAKE_ACCOUNT_1> <STAKE_ACCOUNT_2> \
+    --stake-authority <KEYPAIR> \
+    --fee-payer <KEYPAIR>
+```
+
+### Set Lockup
+
+Lock stake until a specific time:
+
+```bash
+solana stake-set-lockup <STAKE_ACCOUNT_ADDRESS> \
+    --lockup-epoch <EPOCH> \
+    --lockup-date <UNIX_TIMESTAMP> \
+    --new-custodian <PUBKEY> \
+    --withdraw-authority <KEYPAIR>
+```
+
+## Best Practices
+
+1. **Separate Authorities**: Use different keypairs for stake and withdraw authorities
+2. **Hardware Wallets**: Store withdraw authority on hardware wallet
+3. **Diversify**: Delegate to multiple validators to reduce risk
+4. **Monitor Performance**: Regularly check validator performance and commission
+5. **Secure Backups**: Maintain secure backups of authority keypairs
+6. **Test on Devnet**: Practice stake operations on Devnet before mainnet
+7. **Track Rewards**: Monitor stake account balance to track reward accrual
+
+## Troubleshooting
+
+### Insufficient Funds
+
+Ensure the funding account has enough SOL for:
+- Stake amount
+- Rent-exempt minimum (~0.00228 SOL)
+- Transaction fees (~0.000005 SOL per transaction)
+
+### Stake Not Activating
+
+Stake activates at the beginning of the next epoch. Check:
+- Current epoch: `solana epoch-info`
+- Activation epoch shown in `solana stake-account`
+
+### Cannot Withdraw
+
+Reasons withdrawal might fail:
+- Stake is still active (must deactivate first)
+- Still in cool-down period (wait for next epoch)
+- Lockup period hasn't expired
+- Attempting to withdraw below minimum rent-exempt amount
+
+### Authority Errors
+
+Verify you're using the correct authority:
+- Delegation operations require **stake authority**
+- Withdrawals require **withdraw authority**
+- Check current authorities: `solana stake-account <ADDRESS>`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Vote Accounts" icon="check-to-slot" href="/cli/vote-accounts">
+    Create and manage validator vote accounts
+  </Card>
+  
+  <Card title="Cluster Selection" icon="server" href="/cli/cluster-selection">
+    Learn about different Solana clusters
+  </Card>
+</CardGroup>

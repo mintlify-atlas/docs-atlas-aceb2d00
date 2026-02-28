@@ -1,0 +1,542 @@
+---
+title: Cluster Selection with Solana CLI
+description: Configure the Solana CLI to connect to different clusters including devnet, testnet, and mainnet-beta. Learn how to set RPC endpoints and verify cluster versions.
+---
+
+## Solana Clusters
+
+Solana operates multiple clusters for different purposes:
+
+- **Mainnet Beta** - Production network with real economic value
+- **Testnet** - Stable testing network with public access
+- **Devnet** - Development network for developers and validators to test
+- **Localhost** - Local test validator for development
+
+For detailed information about each cluster, see the Solana documentation on available clusters.
+
+## Check Current Configuration
+
+View the CLI's current cluster configuration:
+
+```bash
+solana config get
+```
+
+Output:
+```text
+Config File: /home/solana/.config/solana/cli/config.yml
+RPC URL: https://api.devnet.solana.com
+WebSocket URL: wss://api.devnet.solana.com/ (computed)
+Keypair Path: /home/solana/.config/solana/id.json
+Commitment: confirmed
+```
+
+The `RPC URL` field shows which cluster the CLI is currently targeting.
+
+## Set Cluster Target
+
+Use `solana config set --url` to change the target cluster. After setting a cluster, all subsequent commands will interact with that cluster.
+
+### Devnet
+
+Connect to Devnet (recommended for development):
+
+```bash
+solana config set --url https://api.devnet.solana.com
+```
+
+Devnet is ideal for:
+- Testing applications
+- Learning Solana development
+- Obtaining free test tokens via airdrop
+- Validator testing
+
+### Testnet
+
+Connect to Testnet:
+
+```bash
+solana config set --url https://api.testnet.solana.com
+```
+
+Testnet provides:
+- More stable environment than Devnet
+- Testing before mainnet deployment
+- Public validator participation
+
+### Mainnet Beta
+
+Connect to Mainnet Beta (production network):
+
+```bash
+solana config set --url https://api.mainnet-beta.solana.com
+```
+
+<Warning>
+Mainnet Beta involves real SOL with real economic value. Test thoroughly on Devnet or Testnet before deploying to Mainnet.
+</Warning>
+
+### Localhost
+
+Connect to a local test validator:
+
+```bash
+solana config set --url http://localhost:8899
+```
+
+Useful for:
+- Local development
+- Fast iteration without network latency
+- Testing without network constraints
+
+## Cluster Monikers
+
+The CLI supports short moniker names for clusters:
+
+<CodeGroup>
+```bash Mainnet
+solana config set --url mainnet-beta
+# or just
+solana config set --url m
+```
+
+```bash Testnet
+solana config set --url testnet
+# or just
+solana config set --url t
+```
+
+```bash Devnet
+solana config set --url devnet
+# or just
+solana config set --url d
+```
+
+```bash Localhost
+solana config set --url localhost
+# or just
+solana config set --url l
+```
+</CodeGroup>
+
+## Custom RPC Endpoints
+
+You can connect to custom RPC endpoints:
+
+```bash
+solana config set --url https://your-custom-rpc.com
+```
+
+This is useful for:
+- Using private RPC providers
+- Connecting to custom clusters
+- Using high-performance RPC services
+
+### Popular RPC Providers
+
+Many projects use dedicated RPC providers for improved reliability and performance:
+
+- Helius
+- QuickNode
+- Triton
+- Alchemy
+- Ankr
+
+<Note>
+Some RPC providers require authentication. Check provider documentation for connection details.
+</Note>
+
+## WebSocket Configuration
+
+The CLI automatically computes the WebSocket URL from the RPC URL. To set a custom WebSocket endpoint:
+
+```bash
+solana config set --ws wss://your-custom-ws.com
+```
+
+View current WebSocket URL:
+```bash
+solana config get websocket_url
+```
+
+## Version Compatibility
+
+Ensure your CLI version matches or exceeds the cluster version for best compatibility.
+
+<Steps>
+  <Step title="Check local CLI version">
+    ```bash
+    solana --version
+    ```
+    
+    Output:
+    ```text
+    solana-cli 2.0.0 (src:00000000; feat:123456789, client:Agave)
+    ```
+  </Step>
+
+  <Step title="Check cluster version">
+    ```bash
+    solana cluster-version
+    ```
+    
+    Output:
+    ```text
+    2.0.0
+    ```
+  </Step>
+
+  <Step title="Compare versions">
+    The local CLI version should be **greater than or equal to** the cluster version.
+    
+    If your CLI is outdated, update it:
+    ```bash
+    agave-install update
+    ```
+  </Step>
+</Steps>
+
+<Info>
+While not strictly required, version mismatches can cause compatibility issues or prevent access to newer features.
+</Info>
+
+## Verify Connectivity
+
+After configuring a cluster, verify connectivity:
+
+### Get Cluster Version
+
+```bash
+solana cluster-version
+```
+
+Successful connection returns the version:
+```text
+2.0.0
+```
+
+### View Cluster Nodes
+
+```bash
+solana cluster-nodes
+```
+
+Displays all validators in the cluster:
+```text
+IP Address      | Identity                                     | Version | Vote Account
+----------------+----------------------------------------------+---------+---------------------------------------------
+192.0.2.1:8001  | 8nP3jDvPwhTzv8VpE4pRi8pJGhhtC5T9kB8aU9Ltzfsg | 2.0.0   | 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF
+```
+
+### Get Epoch Info
+
+```bash
+solana epoch-info
+```
+
+Shows current epoch information:
+```text
+Block height: 123456789
+Slot: 98765432
+Epoch: 456
+Transaction Count: 123456789012
+Epoch Slot Range: [98765000..98820000]
+Epoch Completed Percent: 45.12%
+Epoch Completed Slots: 55432/55000 (100.79%)
+Epoch Completed Time: 2d 3h 45m 12s / 4d 8h 0m 0s
+```
+
+### Check Slot
+
+```bash
+solana slot
+```
+
+Returns current slot number:
+```text
+98765432
+```
+
+## Per-Command Cluster Override
+
+Override the configured cluster for a single command using the `--url` flag:
+
+```bash
+solana balance <ADDRESS> --url devnet
+```
+
+This doesn't change your configuration:
+
+```bash
+# Check balance on devnet
+solana balance <ADDRESS> --url devnet
+
+# Check balance on mainnet (without changing config)
+solana balance <ADDRESS> --url mainnet-beta
+
+# Current config remains unchanged
+solana config get
+```
+
+Useful for:
+- Comparing data across clusters
+- One-off operations on different clusters
+- Scripts that need to query multiple clusters
+
+## Configuration Profiles
+
+Manage multiple configurations using separate config files.
+
+### Create Multiple Configs
+
+<CodeGroup>
+```bash Devnet Config
+solana config set --url devnet --keypair ~/wallet-dev.json
+cp ~/.config/solana/cli/config.yml ~/.config/solana/cli/config-devnet.yml
+```
+
+```bash Mainnet Config
+solana config set --url mainnet-beta --keypair ~/wallet-mainnet.json
+cp ~/.config/solana/cli/config.yml ~/.config/solana/cli/config-mainnet.yml
+```
+</CodeGroup>
+
+### Switch Configs
+
+Use the `-C` flag to specify a config file:
+
+```bash
+# Use devnet config
+solana -C ~/.config/solana/cli/config-devnet.yml balance
+
+# Use mainnet config
+solana -C ~/.config/solana/cli/config-mainnet.yml balance
+```
+
+### Set Default Config
+
+Symlink your preferred config:
+
+```bash
+ln -sf ~/.config/solana/cli/config-devnet.yml ~/.config/solana/cli/config.yml
+```
+
+## Commitment Levels
+
+Configure the commitment level for transaction confirmation:
+
+```bash
+solana config set --commitment <LEVEL>
+```
+
+Available commitment levels:
+
+- **processed** - Fastest, query the most recent block
+- **confirmed** - Balance between speed and finality (default)
+- **finalized** - Slowest, maximum finality guarantee
+
+<CodeGroup>
+```bash Processed
+solana config set --commitment processed
+```
+
+```bash Confirmed
+solana config set --commitment confirmed
+```
+
+```bash Finalized
+solana config set --commitment finalized
+```
+</CodeGroup>
+
+### Per-Command Commitment
+
+Override for a single command:
+
+```bash
+solana balance <ADDRESS> --commitment finalized
+```
+
+## Common Cluster Operations
+
+### Get Cluster Stats
+
+```bash
+solana validators
+```
+
+Displays detailed validator information:
+```text
+Identity                                     | Vote Account                                 | Commission | Last Vote    | Stake
+---------------------------------------------+----------------------------------------------+------------+--------------+-------------------
+8nP3jDvPwhTzv8VpE4pRi8pJGhhtC5T9kB8aU9Ltzfsg | 9QU2QSxhb24FUX3Tu2FpczXjpK3VYrvRudywSZaM29mF | 10%        | 98765432     | 1234567.890000000 SOL
+```
+
+### Get Leader Schedule
+
+```bash
+solana leader-schedule
+```
+
+Shows upcoming leader slots for validators.
+
+### Get Transaction Count
+
+```bash
+solana transaction-count
+```
+
+Returns total transactions processed:
+```text
+123456789012
+```
+
+### Get Block Production
+
+```bash
+solana block-production
+```
+
+Displays block production statistics for current epoch.
+
+## Request Airdrops (Devnet/Testnet)
+
+On Devnet and Testnet, request free test tokens:
+
+```bash
+solana airdrop 1
+```
+
+Request larger amounts:
+```bash
+solana airdrop 5
+```
+
+Specify recipient:
+```bash
+solana airdrop 1 <ADDRESS>
+```
+
+<Warning>
+Airdrops are rate-limited. If requests fail, wait a few minutes and try again.
+</Warning>
+
+<Note>
+Airdrops are **not available** on Mainnet Beta. SOL must be purchased or transferred from another account.
+</Note>
+
+## Cluster-Specific Considerations
+
+### Devnet
+
+- **Resets**: May reset periodically
+- **Stability**: Less stable than Testnet or Mainnet
+- **Airdrops**: Available (rate-limited)
+- **Features**: May include experimental features
+
+### Testnet
+
+- **Resets**: Infrequent
+- **Stability**: More stable than Devnet
+- **Airdrops**: Available (rate-limited)
+- **Features**: Similar to Mainnet
+
+### Mainnet Beta
+
+- **Resets**: Never (production network)
+- **Stability**: Highest stability
+- **Airdrops**: Not available
+- **Features**: Production-ready features only
+- **Cost**: Real SOL required for transactions
+
+### Localhost
+
+- **Control**: Full control over network
+- **Speed**: Fastest for development
+- **Isolation**: Completely isolated
+- **Features**: Configure as needed
+
+## Troubleshooting
+
+### Connection Timeout
+
+If commands timeout:
+
+1. Check internet connectivity
+2. Verify RPC endpoint is correct
+3. Try a different RPC provider
+4. Increase RPC timeout:
+
+```bash
+solana config get --url <URL> --rpc-timeout 60
+```
+
+### Invalid URL
+
+Ensure the URL is properly formatted:
+
+```bash
+# Correct
+solana config set --url https://api.devnet.solana.com
+
+# Incorrect
+solana config set --url api.devnet.solana.com  # Missing https://
+```
+
+### Version Mismatch Errors
+
+Update your CLI to match cluster version:
+
+```bash
+agave-install update
+```
+
+## Best Practices
+
+1. **Development**: Always use Devnet or Localhost
+2. **Testing**: Use Testnet for final testing before mainnet
+3. **Production**: Only use Mainnet Beta for production deployments
+4. **Separate Keypairs**: Use different keypairs for each cluster
+5. **Version Management**: Keep CLI version updated
+6. **Config Profiles**: Maintain separate configs for each cluster
+7. **Verify Cluster**: Always verify which cluster you're connected to before operations
+
+## Quick Reference
+
+<CodeGroup>
+```bash View Config
+solana config get
+```
+
+```bash Set Devnet
+solana config set --url devnet
+```
+
+```bash Set Testnet
+solana config set --url testnet
+```
+
+```bash Set Mainnet
+solana config set --url mainnet-beta
+```
+
+```bash Check Version
+solana cluster-version
+```
+
+```bash Verify Connection
+solana epoch-info
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Stake Accounts" icon="coins" href="/cli/stake-accounts">
+    Manage stake accounts and delegate tokens
+  </Card>
+  
+  <Card title="Vote Accounts" icon="check-to-slot" href="/cli/vote-accounts">
+    Create and manage validator vote accounts
+  </Card>
+</CardGroup>

@@ -1,0 +1,421 @@
+---
+title: "Ledger"
+description: "Persistent blockchain storage using blockstore and shreds in Agave"
+---
+
+## Overview
+
+The Ledger subsystem in Agave provides persistent, verifiable storage for the blockchain. It consists of the **Blockstore** (RocksDB-based storage) and the **Shred** system (data fragmentation and Reed-Solomon erasure coding). Together, they enable parallel verification of Proof of History, efficient disk storage, and network transmission of blockchain data.
+
+## Architecture
+
+### Core Components
+
+**Blockstore** (`blockstore.rs:1-200`): RocksDB-backed persistent storage for shreds, entries, transactions, and metadata.
+
+**Shred**: Fundamental unit of ledger data transmission, designed to fit in network MTU (~1280 bytes).
+
+**ShredData** (`shred_data.rs`): Contains actual ledger entries.
+
+**ShredCode** (`shred_code.rs`): Erasure-coded redundancy for data recovery.
+
+**Shredder**: Converts entries into shreds with FEC (Forward Error Correction).
+
+### Data Flow
+
+```
+Entries → Shredder → Data Shreds + Coding Shreds → Network
+                          ↓              ↓
+                    Blockstore      Blockstore
+                          ↓              ↓
+                    Deshredder ← (Recovery if needed)
+                          ↓
+                      Entries
+```
+
+## Blockstore Structure
+
+### RocksDB Column Families
+
+From `blockstore.rs:1-105`, Blockstore uses multiple column families:
+
+- **ShredData**: Data shreds indexed by `(slot, shred_index)`
+- **ShredCode**: Coding shreds for erasure coding
+- **SlotMeta**: Metadata about slot completion and connectivity
+- **TransactionStatus**: Transaction execution results
+- **Rewards**: Reward distribution information
+- **TransactionMemos**: Optional transaction memos
+- **TransactionStatusIndex**: Index for transaction lookups
+- **AddressSignatures**: Index of signatures by address
+- **ProgramCosts**: Compute unit costs per program
+- **OptimisticSlots**: Slots optimistically confirmed
+
+### Slot Metadata
+
+From `blockstore_meta.rs`, `SlotMeta` tracks slot state:
+
+```rust
+pub struct SlotMeta {
+    pub slot: Slot,
+    pub consumed: u64,           // Number of consecutive shreds received
+    pub received: u64,           // Total shreds received
+    pub first_shred_timestamp: u64,
+    pub last_index: Option<u64>, // Index of last shred in slot
+    pub parent_slot: Option<Slot>,
+    pub next_slots: Vec<Slot>,   // Children of this slot
+    pub is_connected: bool,      // Connected to genesis via parent chain
+}
+```
+
+Slots are complete when:
+- `consumed == last_index + 1`
+- All shreds from 0 to `last_index` received
+- `DATA_COMPLETE_SHRED` flag set on final shred
+
+### Persistent Storage Path
+
+Blockstore is stored at configurable path:
+
+```
+ledger/
+  ├── rocksdb/          # RocksDB data files
+  ├── snapshot/         # Snapshot archives
+  └── ...
+```
+
+## Shred Format
+
+### Data Shred Structure
+
+From `shred.rs:1-50`, data shreds have three parts:
+
+```
++--------------------------------------------------------------------+
+| Data Shred                                                         |
++--------------------------------------------------------------------+
+| common header | data header | payload                              |
+|+-------------+|+-----------+|+------------------------------------+|
+|| signature   || parent    || data (ledger entries)              ||
+|| shred type  || flags     || ...                                ||
+|| slot        || size      || (with restricted section at end)   ||
+|+-------------+|+-----------+|+------------------------------------+|
++--------------------------------------------------------------------+
+```
+
+**Common Header** (83 bytes, `SIZE_OF_COMMON_SHRED_HEADER`):
+- Signature (64 bytes)
+- Shred type (data vs coding)
+- Slot number
+- Shred index
+- Version
+
+**Data Header** (5 additional bytes):
+- Parent offset
+- Flags (DATA_COMPLETE_SHRED, LAST_SHRED_IN_SLOT)
+- Size
+
+Total header size: 88 bytes (`SIZE_OF_DATA_SHRED_HEADERS`)
+
+### Coding Shred Structure
+
+From `shred.rs:24-42`:
+
+```
++--------------------------------------------------------------------+
+| Coding Shred                                                       |
++--------------------------------------------------------------------+
+| common header | coding header | payload                            |
+|+-------------+|+-------------+|+----------------------------------+|
+|| signature   || num_data    || encoded data                     ||
+|| shred type  || num_code    || (encoded data shred data)        ||
+|| slot        || position    ||                                  ||
+|+-------------+|+-------------+|+----------------------------------+|
++--------------------------------------------------------------------+
+```
+
+**Coding Header** (6 bytes):
+- `num_data_shreds`: Number of data shreds in FEC batch
+- `num_coding_shreds`: Number of coding shreds in batch
+- `position`: This coding shred's position in batch
+
+Total header size: 89 bytes (`SIZE_OF_CODING_SHRED_HEADERS`)
+
+### Shred Constraints
+
+From `shred.rs:104-127`:
+
+```rust
+const DATA_SHREDS_PER_FEC_BLOCK: usize = 32;
+const CODING_SHREDS_PER_FEC_BLOCK: usize = 32;
+const SHREDS_PER_FEC_BLOCK: usize = 64;  // Total
+
+const MAX_DATA_SHREDS_PER_SLOT: usize = 32_768;
+const MAX_CODE_SHREDS_PER_SLOT: usize = 32_768;
+```
+
+FEC configuration:
+- **32:32 erasure coding**: 32 data shreds + 32 coding shreds per batch
+- Can recover from loss of any 32 shreds in a 64-shred batch
+- Provides 50% redundancy for network resilience
+
+### Shred Flags
+
+From `shred.rs:144-150`:
+
+```rust
+bitflags! {
+    pub struct ShredFlags: u8 {
+        const SHRED_TICK_REFERENCE_MASK = 0b0011_1111;
+        const DATA_COMPLETE_SHRED       = 0b0100_0000;
+        const LAST_SHRED_IN_SLOT        = 0b1100_0000;
+    }
+}
+```
+
+- **SHRED_TICK_REFERENCE_MASK**: Lower 6 bits for tick reference
+- **DATA_COMPLETE_SHRED**: Marks shred completing an entry sequence
+- **LAST_SHRED_IN_SLOT**: Final shred in slot (implies DATA_COMPLETE)
+
+## Shred Creation and Recovery
+
+### Shredder
+
+The `Shredder` converts entries to shreds:
+
+1. **Serialize Entries**: Convert entries to byte stream
+2. **Fragment**: Split into shred-sized chunks (respecting MTU)
+3. **Add Headers**: Attach common and data headers
+4. **FEC Encode**: Generate coding shreds using Reed-Solomon
+5. **Sign**: Leader signs all shreds
+
+### Reed-Solomon Erasure Coding
+
+From `shredder.rs`, erasure coding provides:
+
+- **Recovery**: Reconstruct lost data shreds from coding shreds
+- **Efficiency**: 50% overhead for 50% packet loss tolerance
+- **Parallel**: Can verify shreds in parallel across slots
+
+**ReedSolomonCache**: Thread-local cache of Reed-Solomon encoder/decoder objects to avoid reinitialization overhead.
+
+### Deshredding
+
+Recovering entries from shreds:
+
+1. **Collect Shreds**: Gather shreds for slot from blockstore
+2. **Verify Signatures**: Check leader signature on each shred
+3. **Check Completeness**: Verify all shreds 0..last_index received
+4. **Recover Missing**: Use coding shreds to recover lost data shreds
+5. **Deserialize**: Extract entries from shred payloads
+
+## Blockstore Operations
+
+### Writing Shreds
+
+Inserting shreds into blockstore:
+
+```rust
+// Simplified flow from blockstore.rs
+pub fn insert_shreds(
+    &self,
+    shreds: Vec<Shred>,
+    is_trusted: bool,
+) -> Result<(CompletedSlotsSender, Vec<PossibleDuplicateShred>)>
+```
+
+Process:
+1. **Verify**: Check signatures if not trusted
+2. **Detect Duplicates**: Check for conflicting shreds (possible slashing)
+3. **Update Metadata**: Update SlotMeta with new shred info
+4. **Store**: Write shred to ShredData or ShredCode column
+5. **Check Completion**: Determine if slot is now complete
+6. **Signal**: Notify replay stage if slot completed
+
+### Reading Shreds
+
+Retrieving shreds for replay or repair:
+
+- **By Slot**: Get all shreds for a slot
+- **By Range**: Get shreds in index range for a slot
+- **With Metadata**: Include SlotMeta information
+
+### Slot Completion
+
+From `blockstore_meta.rs`, a slot is complete when:
+
+```rust
+impl SlotMeta {
+    pub fn is_full(&self) -> bool {
+        if let Some(last_index) = self.last_index {
+            self.consumed == last_index + 1
+        } else {
+            false
+        }
+    }
+}
+```
+
+Completion triggers:
+- Replay stage processes the slot
+- Turbine retransmit stops for this slot
+- Repair service adjusts strategy
+
+### Duplicate Detection
+
+From `blockstore.rs:138-161`, duplicate shreds indicate Byzantine behavior:
+
+```rust
+pub enum PossibleDuplicateShred {
+    Exists(Shred),                           // Different shred at same index
+    LastIndexConflict(Shred, Payload),       // Conflicts with slot_meta.last_index
+    ErasureConflict(Shred, Payload),         // Coding shred erasure mismatch
+    MerkleRootConflict(Shred, Payload),      // Merkle root mismatch
+    ChainedMerkleRootConflict(Shred, Payload), // Chained merkle mismatch
+}
+```
+
+Duplicates are reported to consensus for potential slashing.
+
+## Ledger Cleanup
+
+### BlockstoreCleanupService
+
+From `blockstore_cleanup_service.rs:1-150`, automated cleanup:
+
+```rust
+const DEFAULT_MAX_LEDGER_SHREDS: u64 = 200_000_000;  // ~400GB at 2KB/shred
+const DEFAULT_MIN_MAX_LEDGER_SHREDS: u64 = 50_000_000; // ~100GB
+const DEFAULT_CLEANUP_SLOT_INTERVAL: u64 = 512;  // Cleanup every 512 slots
+```
+
+Cleanup strategy:
+
+1. **Count Live Shreds**: Query RocksDB metadata for ShredData entries
+2. **Check Threshold**: If shred count exceeds `max_ledger_shreds`
+3. **Calculate Target**: Determine oldest slot to keep
+4. **Purge FIFO**: Delete oldest slots first
+5. **Update Lowest Slot**: Update blockstore's lowest_slot marker
+
+From `blockstore_cleanup_service.rs:25-36`:
+
+```
+At 5k shreds/slot (50k TPS): 40k slots (~4.4 hours retained)
+At idle 60 shreds/slot: 3.33m slots (~15 days retained)
+```
+
+### Purge Types
+
+From `blockstore_purge.rs`, different purge strategies:
+
+- **PurgeType::Exact**: Remove exact slot range
+- **PurgeType::CompactionFilter**: Use RocksDB compaction for cleanup
+
+### Cleanup Timing
+
+From `blockstore_cleanup_service.rs:40-48`:
+
+```rust
+const LOOP_LIMITER: Duration = 
+    Duration::from_millis(DEFAULT_CLEANUP_SLOT_INTERVAL * DEFAULT_MS_PER_SLOT / 10);
+```
+
+Checks for cleanup periodically but only performs cleanup when:
+- Latest root advanced by at least `DEFAULT_CLEANUP_SLOT_INTERVAL` (512 slots)
+- Shred count exceeds threshold
+
+## Transaction Storage
+
+### TransactionStatus
+
+Blockstore stores transaction execution results:
+
+- **Status**: Success or error details
+- **Fee**: Transaction fee charged
+- **PreBalances/PostBalances**: Account balances before/after
+- **Logs**: Program log messages
+- **ComputeUnitsConsumed**: CU usage
+
+Indexed by `(Slot, Signature)` for efficient lookup.
+
+### Address Signatures
+
+Secondary index enabling queries like "show all transactions for address X":
+
+- Column: `AddressSignatures`
+- Key: `(Address, Slot, Signature)`
+- Enables historical transaction lookup per address
+
+## Snapshot Integration
+
+### Snapshot Storage
+
+Blockstore coordinates with snapshots:
+
+- Stores snapshot metadata in columns
+- Tracks available snapshots via gossip (`SnapshotHashes`)
+- Provides slot ranges for snapshot generation
+
+### Bank Forks Utilities
+
+From `bank_forks_utils.rs`, blockstore provides:
+
+- Load bank from snapshots
+- Replay slots on top of snapshot
+- Verify continuity from snapshot to current root
+
+## Performance Optimizations
+
+### Parallel Verification
+
+From `blockstore.rs:1-4`, design goal:
+
+```
+The blockstore module provides functions for parallel verification
+of the Proof of History ledger.
+```
+
+Shreds enable:
+- Parallel signature verification across shreds
+- Parallel FEC decoding across erasure batches
+- Parallel slot replay (with dependencies)
+
+### RocksDB Configuration
+
+From `blockstore_options.rs`:
+
+- **Compaction**: Background compaction for space reclamation
+- **Compression**: LZ4 compression for older data
+- **Block Cache**: Configurable cache size for hot data
+- **Thread Pools**: Separate flush and compaction threads
+
+### Shred Batching
+
+From `shred.rs:132-140`, typical batch size:
+
+```rust
+pub const fn get_data_shred_bytes_per_batch_typical() -> u64 {
+    let capacity = match ShredData::const_capacity(PROOF_ENTRIES_FOR_32_32_BATCH, false) {
+        Ok(v) => v,
+        // ...
+    };
+    (DATA_SHREDS_PER_FEC_BLOCK * capacity) as u64
+}
+```
+
+Optimizes for 32-shred batches with merkle chaining.
+
+## Key Files
+
+- `blockstore.rs:1-200` - Main blockstore implementation
+- `shred.rs:1-200` - Shred format and types
+- `shredder.rs` - Entry to shred conversion
+- `blockstore_cleanup_service.rs:1-150` - Automated disk cleanup
+- `blockstore_meta.rs` - SlotMeta and metadata structures
+- `blockstore_db.rs` - RocksDB wrapper and column definitions
+
+## Related Components
+
+- **Turbine**: Receives shreds from network, writes to blockstore
+- **Replay Stage**: Reads complete slots from blockstore for execution
+- **Repair Service**: Requests missing shreds using blockstore gaps
+- **Snapshot Service**: Generates snapshots from blockstore state

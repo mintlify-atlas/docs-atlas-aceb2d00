@@ -1,0 +1,515 @@
+---
+title: Setup Guide
+description: Complete walkthrough for setting up an Agave validator on Solana testnet.
+---
+
+This is a guide for getting your validator setup on the Solana testnet cluster for the first time. Testnet is a Solana cluster used for performance testing of the software before the software is used on mainnet. Since testnet is stress tested daily, it is a good cluster to practice validator operations.
+
+<Note>
+Although the guide is specific to testnet, it can be adapted to mainnet or devnet as well.
+</Note>
+
+## Prerequisites
+
+Before starting, make sure you've reviewed the [system requirements](/validator/system-requirements) and have the necessary hardware and network setup.
+
+<Steps>
+
+### Open The Terminal Program
+
+You will be running commands on your trusted computer, not on the remote machine that you plan to use for validator operations. Locate the terminal program on your trusted computer:
+
+- On Mac, search for **terminal** in spotlight
+- On Ubuntu, type `CTRL + Alt + T`
+- On Windows, open the command prompt as an Administrator
+
+### Install The Solana CLI Locally
+
+Validator operators are required to install the tools included in the Solana CLI using the installation instructions.
+
+Once the Solana CLI is installed, verify the installation:
+
+```bash
+solana --version
+```
+
+You should see output similar to:
+
+```
+solana-cli 1.14.17 (src:b29a37cf; feat:3488713414)
+```
+
+Verify the agave-validator binary is installed:
+
+```bash
+agave-validator --version
+```
+
+You should see output similar to:
+
+```
+agave-validator 2.3.1 (src:e3eca4c1; feat:3640012085, client:Agave)
+```
+
+### Configure Solana CLI for Testnet
+
+Change your config to make requests to the testnet cluster:
+
+```bash
+solana config set --url https://api.testnet.solana.com
+```
+
+Verify your config:
+
+```bash
+solana config get
+```
+
+You should see: `RPC URL: https://api.testnet.solana.com`
+
+### Create Keypairs
+
+On your local computer, create the 3 keypairs that you will need to run your validator.
+
+<Note>
+Some operators choose to make vanity keypairs for their identity and vote account using the `grind` sub command.
+</Note>
+
+Create the validator identity keypair:
+
+```bash
+solana-keygen new -o validator-keypair.json
+```
+
+Create the vote account keypair:
+
+```bash
+solana-keygen new -o vote-account-keypair.json
+```
+
+Create the authorized withdrawer keypair:
+
+```bash
+solana-keygen new -o authorized-withdrawer-keypair.json
+```
+
+<Warning>
+The `authorized-withdrawer-keypair.json` should be considered very sensitive information. Many operators choose to use a multisig, hardware wallet, or paper wallet for the authorized withdrawer keypair. The withdrawer keypair should **never** be stored on the remote machine that the validator software runs on.
+</Warning>
+
+### Create a Vote Account
+
+Set the default keypair that the Solana CLI uses:
+
+```bash
+solana config set --keypair ./validator-keypair.json
+```
+
+Verify your account balance (should be 0):
+
+```bash
+solana balance
+```
+
+Airdrop some SOL to create your vote account:
+
+```bash
+solana airdrop 1
+```
+
+<Note>
+The `airdrop` sub command does not work on mainnet, so you will have to acquire SOL and transfer it into this keypair's account if you are setting up a mainnet validator.
+</Note>
+
+Create the vote account:
+
+```bash
+solana create-vote-account -ut \
+    --fee-payer ./validator-keypair.json \
+    ./vote-account-keypair.json \
+    ./validator-keypair.json \
+    ./authorized-withdrawer-keypair.json
+```
+
+<Tip>
+The `-ut` flag tells the CLI command that we would like to use the testnet cluster. `--fee-payer` specifies the keypair that will be used to pay the transaction fees.
+</Tip>
+
+### Save the Withdrawer Keypair Securely
+
+Make sure your `authorized-withdrawer-keypair.json` is stored in a safe place. If you have chosen to create a keypair on disk, you should first backup the keypair and then delete it from your local machine.
+
+<Warning>
+If you lose your withdrawer keypair, you will lose control of your vote account. You will not be able to withdraw tokens from the vote account or update the withdrawer. Make sure to store the `authorized-withdrawer-keypair.json` securely before you move on.
+</Warning>
+
+### SSH To Your Validator
+
+Connect to your remote server:
+
+```bash
+ssh user@<server.hostname>
+```
+
+You will have to check with your server provider to get the correct user account and hostname.
+
+### Update Ubuntu Packages
+
+Make sure you have the latest package versions on your server:
+
+```bash
+sudo apt update
+sudo apt upgrade
+```
+
+### Create Sol User
+
+Create a new Ubuntu user, named `sol`, for running the validator:
+
+```bash
+sudo adduser sol
+```
+
+<Tip>
+It is a best practice to always run your validator as a non-root user, like the `sol` user we just created.
+</Tip>
+
+### Setup Hard Drives
+
+Verify you have at least 2TB of disk space mounted:
+
+```bash
+df -h
+```
+
+To see available hard disk devices:
+
+```bash
+lsblk -f
+```
+
+You may see some devices in the list that have a name but do not have a UUID. Any device without a UUID is unformatted.
+
+#### Format the Ledger Drive
+
+Assuming you have an nvme drive at `/dev/nvme0n1`, format the drive:
+
+```bash
+sudo mkfs -t ext4 /dev/nvme0n1
+```
+
+Verify the UUID was created:
+
+```bash
+lsblk -f
+```
+
+#### Mount the Ledger Drive
+
+Create a directory for mounting:
+
+```bash
+sudo mkdir -p /mnt/ledger
+```
+
+Change ownership to the sol user:
+
+```bash
+sudo chown -R sol:sol /mnt/ledger
+```
+
+Mount the drive:
+
+```bash
+sudo mount /dev/nvme0n1 /mnt/ledger
+```
+
+#### Format and Mount the Accounts Drive
+
+Assuming you have a device at `/dev/nvme1n1`, format the device:
+
+```bash
+sudo mkfs -t ext4 /dev/nvme1n1
+```
+
+Verify the UUID:
+
+```bash
+lsblk -f
+```
+
+Create a directory for mounting:
+
+```bash
+sudo mkdir -p /mnt/accounts
+```
+
+Change ownership:
+
+```bash
+sudo chown -R sol:sol /mnt/accounts
+```
+
+Mount the drive:
+
+```bash
+sudo mount /dev/nvme1n1 /mnt/accounts
+```
+
+### Apply System Tuning
+
+Optimize sysctl knobs:
+
+```bash
+sudo bash -c "cat >/etc/sysctl.d/21-agave-validator.conf <<EOF
+# Increase max UDP buffer sizes
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+
+# Increase memory mapped files limit
+vm.max_map_count = 1000000
+
+# Increase number of allowed open file descriptors
+fs.nr_open = 1000000
+EOF"
+
+sudo sysctl -p /etc/sysctl.d/21-agave-validator.conf
+```
+
+Increase systemd and session file limits:
+
+```bash
+sudo bash -c "cat >/etc/security/limits.d/90-solana-nofiles.conf <<EOF
+# Increase process file descriptor count limit
+* - nofile 1000000
+# Increase memory locked limit (kB)
+* - memlock 2000000
+EOF"
+```
+
+<Warning>
+Close all open sessions (log out then, in again) for the changes to take effect.
+</Warning>
+
+### Copy Keypairs to Validator
+
+On your personal computer, securely copy your keypair files to the validator server:
+
+```bash
+scp validator-keypair.json sol@<server.hostname>:
+scp vote-account-keypair.json sol@<server.hostname>:
+```
+
+<Note>
+The `vote-account-keypair.json` does not have any function other than identifying the vote account to potential delegators. Only the public key of the vote account is important once the account is created.
+</Note>
+
+### Switch to Sol User
+
+On the validator server, switch to the `sol` user:
+
+```bash
+su - sol
+```
+
+### Install Agave Validator
+
+Your remote machine will need `agave-validator` installed. For simplicity, install the application as the `sol` user. Refer to the build from source instructions.
+
+### Create Validator Startup Script
+
+In your sol home directory, create a folder called `bin` and a startup script:
+
+```bash
+mkdir -p /home/sol/bin
+touch /home/sol/bin/validator.sh
+chmod +x /home/sol/bin/validator.sh
+```
+
+Open the file for editing:
+
+```bash
+nano /home/sol/bin/validator.sh
+```
+
+Copy and paste the following contents:
+
+```bash
+#!/bin/bash
+exec agave-validator \
+    --identity /home/sol/validator-keypair.json \
+    --vote-account /home/sol/vote-account-keypair.json \
+    --known-validator 5D1fNXzvv5NjV1ysLjirC4WY92RNsVH18vjmcszZd8on \
+    --known-validator 7XSY3MrYnK8vq693Rju17bbPkCN3Z7KvvfvJx4kdrsSY \
+    --known-validator Ft5fbkqNa76vnsjYNwjDZUXoTWpP7VYm3mtsaQckQADN \
+    --known-validator 9QxCLckBiJc783jnMvXZubK4wH86Eqqvashtrwvcsgkv \
+    --only-known-rpc \
+    --log /home/sol/agave-validator.log \
+    --ledger /mnt/ledger \
+    --accounts /mnt/accounts \
+    --rpc-port 8899 \
+    --dynamic-port-range 8000-8020 \
+    --entrypoint entrypoint.testnet.solana.com:8001 \
+    --entrypoint entrypoint2.testnet.solana.com:8001 \
+    --entrypoint entrypoint3.testnet.solana.com:8001 \
+    --expected-genesis-hash 4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY \
+    --wal-recovery-mode skip_any_corrupted_record \
+    --limit-ledger-size
+```
+
+<Tip>
+Refer to `agave-validator --help` for more information on what each flag does. This startup script is specifically intended for testnet.
+</Tip>
+
+### Verify Validator is Working
+
+Test that your `validator.sh` file runs properly:
+
+```bash
+/home/sol/bin/validator.sh
+```
+
+In a new terminal window, SSH into your server and verify the process is running:
+
+```bash
+ps aux | grep agave-validator
+```
+
+#### Check the Logs
+
+Tail the logs to verify proper operation:
+
+```bash
+su - sol
+tail -f agave-validator.log
+```
+
+Keep an eye out for any lines that say `ERROR`. Assuming you do not see any error messages, exit out of the command.
+
+#### Verify Gossip Registration
+
+Identify your validator's pubkey:
+
+```bash
+solana-keygen pubkey ~/validator-keypair.json
+```
+
+Check that your validator is in gossip:
+
+```bash
+solana gossip | grep <pubkey>
+```
+
+You should see a single line with your validator's IP address and pubkey.
+
+#### Verify in Validators List
+
+After you have staked some SOL to your validator and the stake has activated, verify your validator is ready:
+
+```bash
+solana validators | grep <pubkey>
+```
+
+#### Monitor Catchup Progress
+
+The `solana catchup` command shows how quickly your validator is processing blocks:
+
+```bash
+solana catchup <pubkey>
+```
+
+Once you are happy that the validator can start up without errors, stop the validator by pressing `CTRL+C`.
+
+### Create System Service
+
+Create the systemd service file at `/etc/systemd/system/sol.service`:
+
+```ini
+[Unit]
+Description=Solana Validator
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=sol
+LimitNOFILE=1000000
+LimitMEMLOCK=2000000000
+LogRateLimitIntervalSec=0
+Environment="PATH=/bin:/usr/bin:/home/sol/.local/share/solana/install/active_release/bin"
+ExecStart=/home/sol/bin/validator.sh
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Implement log rotation:
+
+```bash
+cat > logrotate.sol <<EOF
+/home/sol/agave-validator.log {
+  rotate 7
+  daily
+  missingok
+  postrotate
+    systemctl kill -s USR1 sol.service
+  endscript
+}
+EOF
+sudo cp logrotate.sol /etc/logrotate.d/sol
+systemctl restart logrotate.service
+```
+
+Start your validator:
+
+```bash
+sudo systemctl enable --now sol
+```
+
+Verify it's running:
+
+```bash
+tail -f /home/sol/agave-validator*.log
+```
+
+</Steps>
+
+## Next Steps
+
+Now that your validator is running:
+
+1. Set up [monitoring](/validator/monitoring) with agave-watchtower
+2. Review [security best practices](/validator/security)
+3. Learn about [day-to-day operations](/validator/operations)
+4. Understand [troubleshooting](/validator/troubleshooting) common issues
+
+## Common Issues
+
+### Out of Disk Space
+
+Make sure your ledger is on a drive with at least 2TB of space.
+
+### Validator Not Catching Up
+
+This could be a networking/hardware issue, or you may need to get the latest snapshot from another validator node.
+
+### PoH Hashes/Second Rate is Slower Than Cluster Target
+
+If you are using `agave-validator` built from source, ensure that you are using a `release` build and not a `debug` build.
+
+Ensure that your machine's CPU base clock speed is 2.8GHz or faster. Use `lscpu` to check your clock speed.
+
+Set performance governor:
+
+```bash
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+```
+
+Force minimum frequency to maximum:
+
+```bash
+# Example if your maximum GHz is 2.8
+echo 2850000 | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq
+```

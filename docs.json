@@ -1,122 +1,106 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Agave",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#14F195",
+    "light": "#9945FF",
+    "dark": "#14F195"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/anza-xyz/agave"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/anza-xyz/agave"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "what-is-agave",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Architecture",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "architecture/overview",
+              "architecture/validator-anatomy",
+              "architecture/consensus",
+              "architecture/runtime",
+              "architecture/clusters",
+              "architecture/proof-of-stake"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Running a Validator",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "validator/validator-vs-rpc-node",
+              "validator/system-requirements",
+              "validator/setup-guide",
+              "validator/operations",
+              "validator/monitoring",
+              "validator/security",
+              "validator/troubleshooting"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "CLI Tools",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "cli/overview",
+              "cli/installation",
+              "cli/wallet-management",
+              "cli/cluster-selection",
+              "cli/stake-accounts",
+              "cli/vote-accounts"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/building-from-source",
+              "development/testing",
+              "development/contributing",
+              "development/release-process"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "RPC API",
             "pages": [
-              "api-reference/introduction"
+              "api/rpc-overview",
+              "api/http-methods",
+              "api/websocket-methods",
+              "api/deprecated-methods"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Core Components",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/accounts-db",
+              "api/banking-stage",
+              "api/gossip",
+              "api/ledger",
+              "api/runtime"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

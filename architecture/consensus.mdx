@@ -1,0 +1,249 @@
+---
+title: Consensus
+description: Tower BFT consensus mechanism in Agave, including Proof of Stake, voting, and leader scheduling
+---
+
+Agave implements **Tower BFT**, a Proof-of-Stake consensus algorithm optimized for high-throughput blockchains. Tower BFT is based on Practical Byzantine Fault Tolerance (PBFT) but adapted to work with Proof of History as a source of time.
+
+## Overview
+
+Tower BFT solves several key problems:
+
+- **Fork recovery** - Validators can safely recover from voting on non-finalized forks
+- **Fork convergence** - All honest validators eventually agree on the same chain
+- **Risk management** - Validators can configure their risk tolerance via lockout parameters
+- **Rollback cost** - The cost of breaking consistency increases exponentially with time
+- **ASIC resistance** - The exponential lockout structure prevents faster hardware from dominating
+
+Source: `docs/src/implemented-proposals/tower-bft.md:1`
+
+## Time and Slots
+
+Solana's blockchain is divided into **slots**, each with a designated leader who can produce a block for that slot. Time is provided by Proof of History (PoH), a verifiable delay function that creates a cryptographic clock.
+
+- Each slot represents a fixed duration (currently ~400ms)
+- Leaders are scheduled via a deterministic algorithm
+- A slot may be empty if the leader doesn't produce a block
+- Multiple competing blocks (forks) can exist for the same slot
+
+Source: `docs/src/implemented-proposals/tower-bft.md:15`
+
+## Voting Mechanism
+
+Validators communicate their fork preference through **votes**:
+
+### Vote Structure
+
+A vote is a signed message containing:
+- **Validator pubkey** - Identity of the voting validator
+- **Block hash** - The specific block being voted for
+- **Slot number** - Which slot the block belongs to
+- **Timestamp** - When the vote was created
+
+Source: `docs/src/implemented-proposals/tower-bft.md:26`
+
+### Vote Tower
+
+Each validator maintains a **vote tower** - a stack of votes representing their commitment to a fork:
+
+```
+vote | vote slot | lockout | lock expiration slot
+  7  |    11     |    2    |        13
+  6  |    10     |    4    |        14
+  5  |     9     |    8    |        17
+  2  |     2     |   16    |        18
+  1  |     1     |   32    |        33
+```
+
+Key properties:
+- Each vote confirms the fork containing all ancestors
+- Lockouts double with each new vote at greater tower height
+- Expired votes are popped when newer votes arrive
+- Max lockout is 2^32 slots, after which votes are dequeued
+
+Source: `docs/src/implemented-proposals/tower-bft.md:48`
+
+## Lockouts
+
+A **lockout** is a period during which a validator cannot vote for a conflicting fork:
+
+- Measured in slots (units of time)
+- Created when voting on a block
+- Doubles with each additional confirmation
+- Violating a lockout is slashable (in theory)
+
+<Note>
+Lockouts force validators to commit real-time opportunity cost to a specific fork, making it economically expensive to change their vote.
+</Note>
+
+The lockout expiration for a vote is calculated as:
+```
+lockexp(B) = slot(B) + 2^confcount(B)
+```
+
+Where `confcount` is the number of confirmations (position in tower).
+
+Source: `docs/src/implemented-proposals/tower-bft.md:31`
+
+## Fork Choice
+
+Validators select which fork to vote on using stake-weighted voting:
+
+1. **Collect recent votes** - Gather the most recent vote from each validator
+2. **Weight by stake** - Add each validator's stake to their voted block and ancestors
+3. **Choose heaviest fork** - Starting from root, recursively choose the child with most stake
+4. **Break ties** - Use slot number (lower is preferred) to break stake ties
+
+This ensures validators converge on the fork with the most stake committed to it.
+
+Source: `docs/src/implemented-proposals/tower-bft.md:126`
+
+### Fork Choice Algorithm
+
+```python
+B = rooted_block
+while True:
+    if no children of B:
+        return B
+    B = child_with_most_stake_votes(B)
+```
+
+Source: `docs/src/implemented-proposals/tower-bft.md:143`
+
+## Voting Rules
+
+Before voting on a block B, a validator checks:
+
+### 1. Lockout Respect
+
+For any block B' in the tower that is not an ancestor of B:
+```
+lockexp(B') ≤ slot(B)
+```
+
+This ensures the lockout has expired before switching forks.
+
+### 2. Threshold Check
+
+At depth 8 in the simulated tower, check that ≥2/3 of stake has voted for that block or its descendants. This prevents locking onto a minority fork during network partitions.
+
+Source: `docs/src/implemented-proposals/tower-bft.md:104`
+
+### 3. Switch Threshold
+
+When switching forks (voting on a block not descended from the tower top), require that >38% of stake has voted on other forks. This prevents rapid oscillation between forks.
+
+Source: `docs/src/implemented-proposals/tower-bft.md:162`
+
+<Info>
+The 38% switch threshold is derived from optimistic confirmation analysis and ensures that forks achieve economic finality before validators can safely switch.
+</Info>
+
+## Tower State Management
+
+The Tower is implemented in `core/src/consensus.rs` and maintains:
+
+- **vote_state** - Stack of voted slots and lockouts
+- **last_vote** - Most recent vote transaction
+- **last_vote_tx_blockhash** - Blockhash used in vote tx
+- **last_timestamp** - Timestamp of last vote
+- **threshold_depth** - Depth for supermajority check (8)
+- **threshold_size** - Required stake threshold (2/3)
+
+Source: `core/src/consensus.rs:218`
+
+### Tower Persistence
+
+The tower is persisted to disk to survive restarts:
+
+- Stored as `tower-{slot}.bin` in ledger directory
+- Saved after each vote
+- Restored on startup to maintain lockout commitments
+- Critical for preventing equivocation after restart
+
+Source: `core/src/consensus/tower_storage.rs:1`
+
+## Cost of Rollback
+
+The economic cost of rolling back a fork increases exponentially:
+
+| Votes | Lockout (slots) | ASIC Speedup Required |
+|-------|-----------------|----------------------|
+| 1     | 2              | 2x                   |
+| 2     | 4              | 2x                   |
+| 3     | 8              | 2.6x                 |
+| 10    | 1,024          | 102x                 |
+| 20    | 1,048,576      | 52,428x              |
+
+This exponential growth makes deep rollbacks computationally infeasible even with significantly faster hardware.
+
+Source: `docs/src/implemented-proposals/tower-bft.md:172`
+
+## Proof of Stake Integration
+
+Tower BFT operates on Proof of Stake:
+
+- **Stake weight** - Votes are weighted by validator stake
+- **Economic finality** - Rollback cost includes lost rewards and opportunity cost
+- **Slashing** - Equivocation (voting for conflicting forks within lockout) is slashable
+- **Delegation** - Stakers delegate to validators who vote on their behalf
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:1`
+
+## Leader Scheduling
+
+Leaders are scheduled deterministically based on stake:
+
+1. **Epoch boundaries** - Leader schedule is recalculated each epoch
+2. **Stake proportional** - More stake = more leader slots
+3. **Deterministic** - All validators compute the same schedule
+4. **Predictable** - Schedule is known in advance for the current and next epoch
+
+The schedule is computed in `leader-schedule/src/leader_schedule.rs` using the stake distribution at the start of each epoch.
+
+## Optimistic Confirmation
+
+Blocks can achieve **optimistic confirmation** before finality:
+
+- Requires 2/3+ stake voting within one slot
+- Provides fast confirmation for clients
+- Not yet final (can still be rolled back)
+- Economic finality increases with each subsequent confirmation
+
+Source: `docs/src/proposals/optimistic_confirmation.md:1`
+
+## Implementation Details
+
+### ComputedBankState
+
+For each bank, the consensus system computes:
+
+```rust
+pub(crate) struct ComputedBankState {
+    pub voted_stakes: VotedStakes,      // Stake voting on each slot
+    pub total_stake: Stake,             // Total active stake
+    pub fork_stake: Stake,              // Stake on this fork
+    pub parent_is_super_oc: bool,       // Optimistic confirmation
+    pub lockout_intervals: LockoutIntervals,
+    pub my_latest_landed_vote: Option<Slot>,
+}
+```
+
+Source: `core/src/consensus.rs:166`
+
+### Switch Fork Decision
+
+Voting logic returns one of:
+
+- **SameFork** - Vote on the current fork
+- **SwitchProof(Hash)** - Vote with a switch proof hash
+- **FailedSwitchThreshold** - Cannot switch, insufficient stake
+- **FailedSwitchDuplicateRollback** - Cannot switch, would rollback duplicate
+
+Source: `core/src/consensus.rs:66`
+
+## Next Steps
+
+- Learn about [Proof of Stake mechanics](./proof-of-stake)
+- Understand [cluster participation](./clusters)
+- Explore the [runtime system](./runtime)

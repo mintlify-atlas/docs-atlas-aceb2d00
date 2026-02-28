@@ -1,0 +1,294 @@
+---
+title: Clusters
+description: Solana clusters, including mainnet-beta, testnet, devnet, and how validators participate in cluster consensus
+---
+
+A Solana cluster is a set of validators working together to serve client transactions and maintain the integrity of the ledger. Agave validators participate in these clusters to provide decentralized transaction processing and consensus.
+
+## What is a Cluster?
+
+A cluster is defined by:
+
+- **Shared genesis block** - All validators start from the same initial state
+- **Common ledger** - Validators maintain and extend the same blockchain
+- **Gossip network** - Validators communicate via peer-to-peer gossip
+- **Consensus participation** - Validators vote on blocks and achieve finality
+
+Clusters with different genesis blocks are completely independent and ignore each other's existence.
+
+Source: `docs/src/clusters/index.md:1`
+
+## Cluster Types
+
+Solana maintains several public clusters for different purposes:
+
+### Mainnet Beta
+
+The production cluster for real economic activity:
+
+- **Real SOL tokens** - Actual economic value
+- **Persistent** - Ledger is never reset
+- **Permissionless** - Anyone can join as a validator
+- **High stability** - Runs thoroughly tested releases
+
+**Connection Details:**
+```bash
+# Gossip entrypoint
+entrypoint.mainnet-beta.solana.com:8001
+
+# RPC endpoint
+https://api.mainnet-beta.solana.com
+
+# Genesis hash
+5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d
+```
+
+Source: `docs/src/clusters/available.md:128`
+
+<Note>
+Mainnet Beta is called "beta" because the Solana protocol is still evolving. However, it's a production environment with real economic value.
+</Note>
+
+### Testnet
+
+Stress testing environment for core contributors:
+
+- **Test tokens** - No real value
+- **Latest features** - Runs newest software releases
+- **Performance testing** - Focus on network limits and stability
+- **May reset** - Ledger can be reset for testing
+
+**Connection Details:**
+```bash
+# Gossip entrypoint
+entrypoint.testnet.solana.com:8001
+
+# RPC endpoint
+https://api.testnet.solana.com
+
+# Genesis hash
+4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY
+```
+
+Source: `docs/src/clusters/available.md:71`
+
+### Devnet
+
+Development cluster for application developers:
+
+- **Test tokens** - Free tokens from faucet
+- **Stable** - Runs same version as mainnet (usually)
+- **Developer friendly** - For testing dApps and integrations
+- **May reset** - Occasionally reset for upgrades
+
+**Connection Details:**
+```bash
+# Gossip entrypoint
+entrypoint.devnet.solana.com:8001
+
+# RPC endpoint
+https://api.devnet.solana.com
+
+# Genesis hash
+EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG
+```
+
+Source: `docs/src/clusters/available.md:17`
+
+<Tip>
+Application developers should target Devnet for testing. Use the faucet to get test tokens for development.
+</Tip>
+
+## Creating a Cluster
+
+To create a new cluster:
+
+1. **Generate genesis config** - Define initial state
+   - Mint account (initial token supply)
+   - Bootstrap validator identity
+   - Stake distribution
+   - Cluster timing parameters
+
+2. **Start bootstrap validator** - First validator initializes ledger
+   - Loads genesis configuration
+   - Creates initial bank state
+   - Begins producing blocks
+
+3. **Join additional validators** - Other validators connect
+   - Download genesis from bootstrap node
+   - Sync ledger from network
+   - Begin voting on blocks
+
+Source: `docs/src/clusters/index.md:10`
+
+## Joining a Cluster
+
+Validators join through the **gossip network**:
+
+### Gossip Protocol
+
+Gossip enables decentralized cluster membership:
+
+- **Push messages** - Broadcast new information to peers
+- **Pull messages** - Request updates from random peers
+- **Automatic propagation** - Information spreads to all nodes
+- **Eventually consistent** - All nodes get the same information
+
+Gossip synchronization time is O(n²) where n is the number of nodes - slow but reliable.
+
+Source: `docs/src/clusters/index.md:16`
+
+### Registration Process
+
+1. **Connect to entrypoint** - Contact any existing cluster node
+2. **Exchange contact info** - Share IP addresses and ports
+3. **Gossip propagation** - Contact info spreads to all validators
+4. **Sync ledger** - Download and replay blockchain history
+5. **Begin voting** - Start participating in consensus
+
+Source: `docs/src/validator/gossip.md:1`
+
+### Required Information
+
+Validators advertise via gossip:
+
+- **Identity** - Validator public key
+- **TPU address** - Where to send transactions
+- **TVU address** - Where to send shreds
+- **Gossip address** - For cluster communication
+- **RPC address** - For client queries (optional)
+- **Vote account** - For consensus participation
+- **Stake** - Amount of SOL delegated
+
+Source: `docs/src/validator/gossip.md:16`
+
+## Transaction Flow
+
+Clients send transactions to the cluster:
+
+1. **Client submits** - Transaction sent to any validator's TPU
+2. **Forwarding** - Non-leaders forward to current/next leader
+3. **Leader processes** - Leader executes and bundles into blocks
+4. **Broadcast** - Leader sends blocks to all validators via Turbine
+5. **Validation** - Validators replay transactions and vote
+6. **Confirmation** - Supermajority votes provide finality
+
+Source: `docs/src/clusters/index.md:20`
+
+## Confirmation and Finality
+
+Solana achieves subsecond confirmation:
+
+### Confirmation Process
+
+**Confirmation** is the time from leader timestamp to supermajority recognition:
+
+1. Leader timestamps entry with PoH
+2. Leader signs and broadcasts block
+3. Validators receive and validate
+4. Validators vote on valid blocks
+5. Leader observes 2/3+ stake voting
+
+This typically completes in 400-600ms.
+
+Source: `docs/src/clusters/index.md:24`
+
+### Scalable Confirmation
+
+Solana scales confirmation through:
+
+1. **VDF timestamps** - Proof of History provides ordering
+2. **Batch propagation** - Turbine distributes blocks efficiently
+3. **Recursive retransmit** - Tree structure for peer-to-peer relay
+
+Confirmation time grows logarithmically with validator count.
+
+Source: `docs/src/clusters/index.md:30`
+
+### Commitment Levels
+
+Clients can query different commitment levels:
+
+- **Processed** - Transaction executed, not yet voted on
+- **Confirmed** - 2/3+ stake voted on the block
+- **Finalized** - 32+ confirmed blocks built on top (max lockout)
+
+Source: `runtime/src/commitment.rs:1`
+
+<Info>
+Most applications use "confirmed" commitment, which provides strong guarantees in about 400ms while allowing for rare rollbacks in extreme network conditions.
+</Info>
+
+## Cluster Timing
+
+Clusters operate on fixed time intervals:
+
+- **Slot** - ~400ms, time for one leader to produce a block
+- **Epoch** - 432,000 slots (~2 days), period for stake/leader recalculation
+- **Tick** - ~6.25ms, PoH timestamp granularity
+
+Timing parameters are set in genesis and cannot change without a fork.
+
+## Leader Scheduling
+
+Leaders are scheduled deterministically:
+
+1. **Stake calculation** - Sum stake at epoch boundary
+2. **Leader generation** - Deterministic algorithm assigns slots
+3. **Stake proportional** - More stake = more leader slots
+4. **Advance notice** - Schedule known for current and next epoch
+
+All validators compute the same schedule independently.
+
+Source: `leader-schedule/src/lib.rs:1`
+
+## Stake and Voting
+
+### Stake Accounts
+
+Validators receive delegated stake:
+
+- **Delegation** - Stakers delegate SOL to validator vote accounts
+- **Warmup/Cooldown** - Stake activates/deactivates over epochs
+- **Rewards** - Both validator and delegators earn inflation rewards
+- **Slashing** - Stake can be slashed for malicious behavior (planned)
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:1`
+
+### Vote Accounts
+
+Each validator has a vote account:
+
+```rust
+pub struct VoteState {
+    pub votes: VecDeque<Lockout>,      // Vote history
+    pub root_slot: Option<Slot>,       // Last finalized slot
+    pub credits: u64,                  // Earned vote credits
+    pub commission: u8,                // Validator commission %
+    pub node_pubkey: Pubkey,          // Validator identity
+}
+```
+
+Votes are recorded on-chain and visible to all validators.
+
+Source: `docs/src/consensus/stake-delegation-and-rewards.md:46`
+
+## Cluster Performance
+
+Key performance characteristics:
+
+- **Throughput** - 50,000+ TPS on mainnet
+- **Confirmation** - 400ms for confirmed commitment
+- **Finality** - ~13 seconds for finalized commitment
+- **Block time** - 400ms slots (variable based on leader)
+- **Fee cost** - ~$0.00025 per transaction (varies with demand)
+
+<Tip>
+Cluster performance depends on validator hardware, network topology, and transaction complexity. Monitor cluster health via metrics and block explorers.
+</Tip>
+
+## Next Steps
+
+- Learn about [Proof of Stake mechanics](./proof-of-stake)
+- Understand [validator anatomy](./validator-anatomy)
+- Explore [consensus in depth](./consensus)

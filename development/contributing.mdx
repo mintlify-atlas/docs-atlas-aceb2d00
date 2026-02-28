@@ -1,0 +1,315 @@
+---
+title: Contributing
+description: Guidelines for contributing to Agave, including code standards, pull request workflow, and review process
+---
+
+These guidelines help maintain code quality and consistency across the Agave codebase. The goal is to make the codebase appear as if authored by a single developer.
+
+## First Time Contributors
+
+<Warning>
+  First time contributors should read this guide in its entirety before opening a pull request. PRs from external contributors that make inconsequential changes may be closed without merging at the discretion of Agave maintainers.
+</Warning>
+
+Consequential changes are determined case-by-case. As a guideline:
+- Spelling and grammar fixes are typically **not** consequential unless they materially correct the message
+- Bug fixes, feature additions, and performance improvements are consequential
+- Refactoring and code quality improvements are consequential
+
+## Pull Request Process
+
+### PR Size Guidelines
+
+Small, frequent PRs are strongly preferred over large, infrequent ones. Large PRs:
+- Are difficult to review
+- Block others from making progress
+- Lead to "rebase hell"
+
+<Tip>
+  **How big is too big?** For PRs with functional changes, aim for ~1,000 lines of changes maximum. Refactoring PRs without functional changes can be larger.
+</Tip>
+
+### Breaking Down Large Changes
+
+When one change requires another, use cherry-picking to create separate PRs:
+
+```bash
+# Commit your prerequisite fix
+git commit -am "Fix foo, needed by bar"
+
+# Create a separate branch for it
+git checkout master
+git checkout -b fix-foo
+git cherry-pick fix-bar
+git push --set-upstream origin fix-foo
+```
+
+Then continue working on your original branch and rebase to make the fix the first commit:
+
+```bash
+git checkout fix-bar
+git rebase -i master  # Move fix-foo to top
+```
+
+After the prerequisite is merged, rebase to remove the cherry-picked commit:
+
+```bash
+git pull --rebase upstream master
+```
+
+## Pre-Submission Checks
+
+Before pushing code, always run:
+
+<Steps>
+  <Step title="Sanity checks">
+    ```bash
+    ./ci/test-sanity.sh
+    ```
+  </Step>
+
+  <Step title="Code checks">
+    ```bash
+    ./ci/test-checks.sh
+    ```
+  </Step>
+
+  <Step title="Feature checks">
+    ```bash
+    ./ci/feature-check/test-feature.sh
+    ```
+  </Step>
+</Steps>
+
+## Code Requirements
+
+### Testing Requirements
+
+- **90% coverage minimum**: All changes should have unit and integration tests covering at least 90% of added code paths
+- **Fast and reliable**: Tests should run quickly and not be flaky
+- **Comprehensive**: Include stress tests for performance-critical code
+
+### Performance Requirements
+
+- **Benchmark results**: All performance-related changes must include benchmark evidence
+- **Profile data**: Include validator timings or profiles for mainnet/testnet
+- **Justification**: Added complexity must be justified by commensurate performance improvement
+
+### Code Quality Requirements
+
+- **Consensus changes**: Must be behind a feature gate with a merged SIMD
+- **Subject matter review**: Changes should be reviewed by domain experts
+- **Master-first**: All changes merge to master first; only critical changes backport to release branches
+- **No duplication**: Avoid duplicate code where possible
+- **No abbreviations**: Spell out variable names unless used as closure arguments
+- **Changelog entries**: Add entries for features that should be in release notes
+- **Separate concerns**: Don't mix refactoring and logical changes
+
+## Draft Pull Requests
+
+<Tip>
+  Consider opening **all PRs as drafts** initially. Draft PRs let you:
+  - Start CI automation
+  - Review your own changes
+  - Write detailed descriptions
+  - Get past CI before requesting human review
+</Tip>
+
+<Steps>
+  <Step title="Open as draft">
+    Create a draft PR and let CI run
+  </Step>
+
+  <Step title="Write description">
+    While CI runs, write a detailed problem description and solution
+  </Step>
+
+  <Step title="Wait for CI">
+    Ensure CI passes before requesting review
+  </Step>
+
+  <Step title="Ready for review">
+    Click "Ready to Review" and add reviewers
+  </Step>
+</Steps>
+
+<Warning>
+  **Do not add reviewers to draft PRs.** GitHub doesn't clear approvals when converting from draft, which can cause confusion.
+</Warning>
+
+## PR Description Structure
+
+### The PR Title
+
+Write titles from the user's perspective:
+
+**Good examples:**
+- Add rent to accounts
+- Fix out-of-memory error in validator
+- Clean up `process_message()` in runtime
+
+**Title conventions:**
+- First word capitalized and in imperative mood ("add", not "added")
+- No trailing period
+- State what was done, to what, and in what context
+
+### Problem Statement
+
+Describe how the product is missing a feature, how a feature is incomplete, or how an implementation is undesirable.
+
+<Note>
+  Reviewer time is scarce. Don't make reviewers click through links - copy relevant problem descriptions directly into your PR.
+</Note>
+
+### Proposed Changes
+
+List the steps taken to solve the problem, typically as bullet points:
+- Each major change or addition
+- High-level approach
+- Key decisions made
+
+### Code Changes
+
+The actual diff should implement what was proposed. Reviewers look for:
+- Implementation matches the proposal
+- Code is maintainable
+- Tests cover all new code paths
+
+## Getting PRs Merged
+
+### Timeline Expectations
+
+PRs are typically reviewed and merged **within 7 days**. If your PR has been open longer, reviewers may lack confidence in the change quality.
+
+Consider:
+- Closing and returning with smaller PRs
+- Adding more detailed problem/solution descriptions
+- Ensuring tests cover all new code
+
+### Finding Reviewers
+
+There's no single person watching the PR queue. To find reviewers:
+
+1. Use `git blame` to find component authors
+2. Ask on Discord
+3. Include a detailed problem description to engage interested parties
+4. Remember: changing code is **your** priority, not necessarily theirs
+
+### Managing Review Feedback
+
+When reviewers provide feedback:
+
+<Steps>
+  <Step title="Acknowledge quickly">
+    Use thumbs up emoji to acknowledge feedback
+  </Step>
+
+  <Step title="Reference fixes">
+    Reply with "Fixed in COMMIT_HASH" and mark resolved if you're confident
+  </Step>
+
+  <Step title="Confirm if uncertain">
+    Reply "Is this what you had in mind? COMMIT_HASH" if unsure
+  </Step>
+
+  <Step title="Request re-review">
+    Directly mention reviewers when ready for another pass
+  </Step>
+</Steps>
+
+### Making PRs Easy to Approve
+
+**Things that make review harder:**
+- Orthogonal changes unrelated to the problem
+- Unnecessary renaming
+- Not following established conventions
+- Whitespace changes
+- Force-pushing unnecessarily
+- Not responding to review comments
+
+**Things that make review easier:**
+- Tests for all new/changed behavior
+- Documentation of manual testing performed
+- Performance results for optimization PRs
+- Focused changes addressing one problem
+
+## Rust Coding Conventions
+
+### Formatting
+
+All Rust code uses `rustfmt`:
+
+```bash
+# Format all code
+cargo +nightly fmt
+```
+
+### Clippy
+
+Don't change Clippy config without good reason. To ignore Clippy advice explicitly:
+
+```rust
+#[allow(clippy::too_many_arguments)]
+fn my_function() {
+    // ...
+}
+```
+
+### Naming Conventions
+
+**Variables:**
+- Spell out names (don't abbreviate unless in closures)
+- Lowercase type names with underscores: `let hash_map = HashMap::new();`
+- Add prefixes for multiple instances: `alice_keypair`, `bob_keypair`
+- Or use numeric suffixes: `tx0`, `tx1`
+- Keep names consistent across functions
+
+**Functions:**
+- Use `<verb>_<subject>` pattern
+- Unit tests: `test_<description>`
+- Benchmarks: `bench_<description>`
+- Don't abbreviate words
+- Don't namespace unnecessarily
+
+### Error Handling
+
+- Only use `unwrap()` where you can prove it never panics
+- Prefer `.expect("reason")` when panic is desirable
+- Document why unwrap is safe in complex cases
+
+### Test-Only Code
+
+Mark test utilities appropriately:
+
+```rust
+// Within a crate
+#[cfg(test)]
+fn helper_for_tests() {}
+
+// Across crates
+#[cfg(feature = "dev-context-only-utils")]
+pub fn test_helper() {}
+```
+
+## Design Proposals
+
+For architectural changes, submit a design proposal following the [proposal process](https://github.com/anza-xyz/agave/blob/master/docs/src/proposals.md#submit-a-design-proposal).
+
+View existing proposals:
+- [Accepted Proposals](https://docs.anza.xyz/proposals/accepted-design-proposals)
+- [Implemented Proposals](https://docs.anza.xyz/implemented-proposals/implemented-proposals)
+
+## Labels
+
+Common PR/issue labels:
+
+- **automerge**: Automatically merge when CI passes (small hot-fixes only, less than 100 lines)
+- **good first issue**: Non-urgent, self-contained issues suitable for newcomers
+
+See the [full label list](https://github.com/anza-xyz/agave/issues/labels).
+
+## Next Steps
+
+- Review [testing guidelines](/development/testing) for test requirements
+- Understand the [release process](/development/release-process)
+- Build from source following the [build guide](/development/building-from-source)

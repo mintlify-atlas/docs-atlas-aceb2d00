@@ -1,0 +1,370 @@
+---
+title: Security Best Practices
+description: Security best practices for validator operators including key management, network security, and system hardening.
+---
+
+Being a system administrator for a validator requires technical knowledge of the system and security best practices. The following list should help you get started and is considered the bare minimum for keeping your system safe.
+
+## Key Management
+
+### DO NOT Store Your Withdrawer Key On Your Validator
+
+<Warning>
+Your withdrawer key gives the operator full control of the vote account. It is highly sensitive information and should **never** be stored on the validator itself.
+</Warning>
+
+There are a number of options for withdrawer key management:
+
+- **Hardware wallets** - Ledger, Trezor, or other hardware wallet devices
+- **Paper wallets** - Generated offline and stored securely
+- **Multisig** - Each key of the multisig is a hardware wallet or paper wallet
+
+Whichever option you choose, make sure the authorized withdrawer key is:
+
+1. Generated on a trusted computer (other than your validator)
+2. Stored securely offline
+3. Backed up in multiple secure locations
+4. Never stored on your validator at any time
+
+<Note>
+If you lose your withdrawer keypair, you will lose control of your vote account. You will not be able to withdraw tokens from the vote account or update the withdrawer.
+</Note>
+
+### Validator Identity Key
+
+The validator identity keypair must be stored as a "hot wallet" in a keypair file on the same system the validator process is running, because the validator is frequently signing transactions and paying fees.
+
+Because a hot wallet is generally less secure than an offline or "cold" wallet, the validator operator may choose to store only enough SOL on the identity account to cover voting fees for a limited amount of time, such as a few weeks or months.
+
+<Tip>
+The validator identity account could be periodically topped off from a more secure wallet. This practice can reduce the risk of loss of funds if the validator node's disk or file system becomes compromised or corrupted.
+</Tip>
+
+### Vote Authority Key
+
+The vote authority keypair is used to sign each vote transaction. Like the validator identity, this must be a hot keypair on the same file system as the validator process.
+
+For efficiency, the vote authority can be set to the same address as the validator identity. If they are the same, only one signature per vote transaction is needed, resulting in half the transaction fee compared to using two different accounts.
+
+### Backup Your Keys
+
+<Warning>
+If you don't back up your keys, you WILL NOT BE ABLE TO RECOVER YOUR VALIDATOR if you lose access to it. If this happens, YOU WILL LOSE YOUR ALLOCATION OF SOL TOO.
+</Warning>
+
+To backup your validator identity keypair:
+
+1. **Back up your keypair file** - Copy `validator-keypair.json` to secure offline storage
+2. **Or back up your seed phrase** - If you generated the key with a seed phrase, store it securely
+3. **Store backups in multiple locations** - Use different physical locations
+4. **Encrypt your backups** - Protect backup files with strong encryption
+5. **Test recovery** - Periodically verify you can recover from your backups
+
+## System Security
+
+### DO NOT Run The Validator as Root User
+
+<Warning>
+It may be easier to get started by running your application as root, but it is a bad practice.
+</Warning>
+
+If there is an exploit in your system, a hacker could have full access if your Solana application is running as the `root` user. Instead, create a user called `sol` and run the application as the `sol` user.
+
+Create the sol user:
+
+```bash
+sudo adduser sol
+```
+
+### Keep Your System Up To Date
+
+Make sure to regularly update packages in your Ubuntu system:
+
+```bash
+sudo apt update
+sudo apt upgrade
+```
+
+<Tip>
+Out of date packages may contain known security vulnerabilities that a hacker could exploit. A good practice would be to update weekly at least.
+</Tip>
+
+### Close Ports That Are Not In Use
+
+Your system should close all ports that do not need to be open to the outside world. A common firewall for closing ports is `ufw` (uncomplicated firewall).
+
+Basic UFW setup:
+
+```bash
+# Install UFW
+sudo apt install ufw
+
+# Allow SSH (change port if you use non-standard)
+sudo ufw allow 22/tcp
+
+# Allow validator P2P ports
+sudo ufw allow 8000:8020/tcp
+sudo ufw allow 8000:8020/udp
+
+# Enable firewall
+sudo ufw enable
+
+# Check status
+sudo ufw status
+```
+
+<Warning>
+Make sure to allow SSH before enabling UFW, or you may lock yourself out of your server!
+</Warning>
+
+### Eliminate Brute Force Attacks With fail2ban
+
+[fail2ban](https://github.com/fail2ban/fail2ban) is a network security tool that checks your logs for suspicious login attempts and bans those IP addresses after repeated attempts. This will help mitigate brute force attacks on your server.
+
+The default setup should work out-of-the-box by simply installing `fail2ban`:
+
+```bash
+sudo apt install fail2ban
+```
+
+Verify it's running:
+
+```bash
+sudo systemctl status fail2ban
+```
+
+### DO NOT Use Password Authentication for SSH
+
+In addition to installing `fail2ban`, it is recommended to disable password based authentication for SSH access. SSH key based authentication is preferred.
+
+#### Generate SSH Key (on your local machine)
+
+```bash
+ssh-keygen -t ed25519 -C "your_email@example.com"
+```
+
+#### Copy SSH Key to Server
+
+```bash
+ssh-copy-id user@server_hostname
+```
+
+#### Disable Password Authentication
+
+Edit SSH config:
+
+```bash
+sudo nano /etc/ssh/sshd_config
+```
+
+Set the following:
+
+```
+PasswordAuthentication no
+PubkeyAuthentication yes
+ChallengeResponseAuthentication no
+```
+
+Restart SSH:
+
+```bash
+sudo systemctl restart sshd
+```
+
+<Warning>
+Make sure you can log in with your SSH key before disabling password authentication!
+</Warning>
+
+## Network Security
+
+### Use a Static IP Address
+
+Your validator should have a static public IP address. Dynamic IPs can cause issues with gossip and peer connections.
+
+### Limit SSH Access by IP
+
+If you have a static IP address for management, limit SSH access to only that IP:
+
+```bash
+sudo ufw allow from YOUR_IP_ADDRESS to any port 22
+```
+
+### Do Not Run Behind NAT
+
+<Warning>
+It is not recommended to run a validator behind a NAT. Operators who choose to do so should be comfortable configuring their networking equipment and debugging any traversal issues on their own.
+</Warning>
+
+Validators need direct internet connectivity for optimal performance. NAT can cause issues with:
+
+- Gossip protocol
+- Peer discovery
+- Turbine (block propagation)
+- Network performance
+
+### Monitor Network Connections
+
+Regularly check for unusual network connections:
+
+```bash
+# View active connections
+sudo netstat -tunlp
+
+# Monitor connection attempts
+sudo tail -f /var/log/auth.log
+```
+
+## File System Security
+
+### Set Proper File Permissions
+
+Ensure your keypair files have restricted permissions:
+
+```bash
+chmod 600 ~/validator-keypair.json
+chmod 600 ~/vote-account-keypair.json
+chown sol:sol ~/validator-keypair.json
+chown sol:sol ~/vote-account-keypair.json
+```
+
+### Encrypt Sensitive Data at Rest
+
+Consider using disk encryption for drives containing validator data:
+
+```bash
+# LUKS encryption for a new drive
+sudo cryptsetup luksFormat /dev/nvme0n1
+sudo cryptsetup luksOpen /dev/nvme0n1 encrypted_drive
+sudo mkfs.ext4 /dev/mapper/encrypted_drive
+```
+
+### Regular Backups
+
+While you should not back up your withdrawer key on the validator, you should back up:
+
+- Validator identity keypair
+- Vote account keypair (public key is all that's needed)
+- System configuration files
+- Startup scripts
+
+<Tip>
+Store backups in a different physical location than your validator to protect against site-wide disasters.
+</Tip>
+
+## Operational Security
+
+### Use a Dedicated Machine
+
+Run your validator on a dedicated machine that is not used for other purposes. This reduces the attack surface and prevents resource contention.
+
+### Minimize Installed Software
+
+Only install software that is necessary for validator operations. Each additional package is a potential security vulnerability.
+
+```bash
+# List installed packages
+apt list --installed
+
+# Remove unnecessary packages
+sudo apt remove <package_name>
+```
+
+### Enable Automatic Security Updates
+
+Configure unattended-upgrades for automatic security patches:
+
+```bash
+sudo apt install unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades
+```
+
+### Monitor System Logs
+
+Regularly review system logs for suspicious activity:
+
+```bash
+# Authentication logs
+sudo tail -f /var/log/auth.log
+
+# System logs
+sudo journalctl -xe
+
+# Failed login attempts
+sudo grep "Failed password" /var/log/auth.log
+```
+
+### Implement Monitoring and Alerting
+
+Set up monitoring to alert you of:
+
+- Unauthorized SSH access attempts
+- Unusual CPU, memory, or disk usage
+- Network anomalies
+- File system changes
+- Process crashes
+
+### Use Two-Factor Authentication
+
+Where possible, enable two-factor authentication for:
+
+- Server access
+- GitHub account (for source code access)
+- Cloud provider accounts
+- Any management interfaces
+
+## Incident Response
+
+### Have a Response Plan
+
+Document procedures for common security incidents:
+
+1. **Compromised key** - Steps to rotate keys
+2. **Unauthorized access** - How to investigate and lock down
+3. **DDoS attack** - Mitigation strategies
+4. **System compromise** - Recovery procedures
+
+### Report Security Issues
+
+<Warning>
+DO NOT CREATE A GITHUB ISSUE to report a security problem in Agave.
+</Warning>
+
+Instead, use the [Report a Vulnerability](https://github.com/anza-xyz/agave/security/advisories/new) link. Provide:
+
+- Helpful title
+- Detailed description of the vulnerability
+- Exploit proof-of-concept
+
+<Note>
+Speculative submissions without proof-of-concept will be closed with no further consideration.
+</Note>
+
+If you do not receive a response in the advisory within 72 hours, send an email to security@anza.xyz with the full URL of the advisory you have created.
+
+## Security Checklist
+
+Use this checklist to verify your validator security:
+
+- [ ] Withdrawer key is NOT stored on validator
+- [ ] Withdrawer key is backed up securely offline
+- [ ] Validator identity key is backed up
+- [ ] Running validator as non-root user (sol)
+- [ ] System packages are up to date
+- [ ] Firewall (UFW) is configured and enabled
+- [ ] fail2ban is installed and running
+- [ ] SSH password authentication is disabled
+- [ ] SSH key authentication is configured
+- [ ] SSH access is limited by IP (if possible)
+- [ ] File permissions are set correctly (600 for keys)
+- [ ] Using a static public IP address
+- [ ] Not running behind NAT
+- [ ] Monitoring and alerting is configured
+- [ ] Incident response plan is documented
+- [ ] Regular security audits are scheduled
+
+## Additional Resources
+
+- [Digital Ocean UFW Essentials](https://www.digitalocean.com/community/tutorials/ufw-essentials-common-firewall-rules-and-commands)
+- [fail2ban GitHub](https://github.com/fail2ban/fail2ban)
+- [SSH Hardening Guide](https://www.ssh.com/academy/ssh/config)
+- [Ubuntu Security Best Practices](https://ubuntu.com/security)

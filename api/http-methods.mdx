@@ -1,0 +1,629 @@
+---
+title: HTTP JSON-RPC Methods
+description: Complete reference for Agave validator HTTP JSON-RPC API methods
+---
+
+This page documents the core HTTP JSON-RPC methods available in the Agave validator. All methods use JSON-RPC 2.0 specification over HTTP POST.
+
+## Account Methods
+
+### getAccountInfo
+
+Returns account information for a given public key.
+
+**Method**: `getAccountInfo`
+
+<ParamField path="pubkey" type="string" required>
+  Account public key as base-58 encoded string
+</ParamField>
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="encoding" type="string">
+    Encoding format: `base58`, `base64`, `base64+zstd`, `jsonParsed`
+  </ParamField>
+  
+  <ParamField path="dataSlice" type="object">
+    Request a slice of account data
+    
+    <ParamField path="offset" type="integer">
+      Byte offset to start slice
+    </ParamField>
+    
+    <ParamField path="length" type="integer">
+      Number of bytes to return
+    </ParamField>
+  </ParamField>
+  
+  <ParamField path="commitment" type="string">
+    Commitment level: `processed`, `confirmed`, `finalized` (default: `finalized`)
+  </ParamField>
+  
+  <ParamField path="minContextSlot" type="integer">
+    Minimum slot to evaluate request
+  </ParamField>
+</ParamField>
+
+**Response**:
+
+<ResponseField name="context" type="object">
+  <ResponseField name="slot" type="integer">
+    Slot number used for the query
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="value" type="object | null">
+  Account information or null if account doesn't exist
+  
+  <ResponseField name="lamports" type="integer">
+    Account balance in lamports
+  </ResponseField>
+  
+  <ResponseField name="owner" type="string">
+    Base-58 encoded public key of the program owner
+  </ResponseField>
+  
+  <ResponseField name="data" type="array | string">
+    Account data, format depends on encoding parameter
+  </ResponseField>
+  
+  <ResponseField name="executable" type="boolean">
+    Whether the account is executable
+  </ResponseField>
+  
+  <ResponseField name="rentEpoch" type="integer">
+    Epoch at which account will next owe rent
+  </ResponseField>
+</ResponseField>
+
+```bash Request
+curl https://api.devnet.solana.com -X POST -H "Content-Type: application/json" -d '
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getAccountInfo",
+  "params": [
+    "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg",
+    {
+      "encoding": "base64"
+    }
+  ]
+}'
+```
+
+```json Response
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "context": {
+      "slot": 123456789
+    },
+    "value": {
+      "lamports": 1000000000,
+      "owner": "11111111111111111111111111111111",
+      "data": ["", "base64"],
+      "executable": false,
+      "rentEpoch": 361
+    }
+  },
+  "id": 1
+}
+```
+
+---
+
+### getBalance
+
+Returns the lamport balance of an account.
+
+**Method**: `getBalance`
+
+<ParamField path="pubkey" type="string" required>
+  Account public key as base-58 encoded string
+</ParamField>
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="commitment" type="string">
+    Commitment level (default: `finalized`)
+  </ParamField>
+  
+  <ParamField path="minContextSlot" type="integer">
+    Minimum slot to evaluate request
+  </ParamField>
+</ParamField>
+
+**Response**:
+
+<ResponseField name="context" type="object">
+  <ResponseField name="slot" type="integer">
+    Slot number used for the query
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="value" type="integer">
+  Account balance in lamports
+</ResponseField>
+
+```bash Request
+curl https://api.devnet.solana.com -X POST -H "Content-Type: application/json" -d '
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getBalance",
+  "params": [
+    "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg"
+  ]
+}'
+```
+
+```json Response
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "context": {
+      "slot": 123456789
+    },
+    "value": 1000000000
+  },
+  "id": 1
+}
+```
+
+---
+
+## Block Methods
+
+### getBlock
+
+Returns identity and transaction information about a confirmed block.
+
+**Method**: `getBlock`
+
+<ParamField path="slot" type="integer" required>
+  Slot number to query
+</ParamField>
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="encoding" type="string">
+    Encoding for transaction data: `json`, `jsonParsed`, `base58`, `base64` (default: `json`)
+  </ParamField>
+  
+  <ParamField path="transactionDetails" type="string">
+    Level of transaction detail: `full`, `accounts`, `signatures`, `none` (default: `full`)
+  </ParamField>
+  
+  <ParamField path="rewards" type="boolean">
+    Whether to populate rewards array (default: `true`)
+  </ParamField>
+  
+  <ParamField path="commitment" type="string">
+    Commitment level: `confirmed`, `finalized` (default: `finalized`)
+  </ParamField>
+  
+  <ParamField path="maxSupportedTransactionVersion" type="integer">
+    Max transaction version to return (0 for legacy only)
+  </ParamField>
+</ParamField>
+
+**Response**:
+
+<ResponseField name="blockhash" type="string">
+  Blockhash of this block
+</ResponseField>
+
+<ResponseField name="previousBlockhash" type="string">
+  Blockhash of parent block
+</ResponseField>
+
+<ResponseField name="parentSlot" type="integer">
+  Slot index of parent block
+</ResponseField>
+
+<ResponseField name="blockTime" type="integer | null">
+  Estimated production time as Unix timestamp
+</ResponseField>
+
+<ResponseField name="blockHeight" type="integer">
+  Number of blocks beneath this block
+</ResponseField>
+
+<ResponseField name="transactions" type="array">
+  Array of transaction objects
+</ResponseField>
+
+<ResponseField name="rewards" type="array">
+  Block rewards
+</ResponseField>
+
+```bash Request
+curl https://api.devnet.solana.com -X POST -H "Content-Type: application/json" -d '
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getBlock",
+  "params": [
+    430,
+    {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "transactionDetails": "full",
+      "rewards": false
+    }
+  ]
+}'
+```
+
+---
+
+### getBlockHeight
+
+Returns the current block height of the node.
+
+**Method**: `getBlockHeight`
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="commitment" type="string">
+    Commitment level (default: `finalized`)
+  </ParamField>
+  
+  <ParamField path="minContextSlot" type="integer">
+    Minimum slot to evaluate request
+  </ParamField>
+</ParamField>
+
+**Response**:
+
+<ResponseField name="result" type="integer">
+  Current block height
+</ResponseField>
+
+```bash Request
+curl https://api.devnet.solana.com -X POST -H "Content-Type: application/json" -d '
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getBlockHeight"
+}'
+```
+
+```json Response
+{
+  "jsonrpc": "2.0",
+  "result": 123456789,
+  "id": 1
+}
+```
+
+---
+
+## Transaction Methods
+
+### getTransaction
+
+Returns transaction details for a confirmed transaction.
+
+**Method**: `getTransaction`
+
+<ParamField path="signature" type="string" required>
+  Transaction signature as base-58 encoded string
+</ParamField>
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="encoding" type="string">
+    Encoding for returned data: `json`, `jsonParsed`, `base58`, `base64` (default: `json`)
+  </ParamField>
+  
+  <ParamField path="commitment" type="string">
+    Commitment level: `confirmed`, `finalized` (default: `finalized`)
+  </ParamField>
+  
+  <ParamField path="maxSupportedTransactionVersion" type="integer">
+    Max transaction version to return
+  </ParamField>
+</ParamField>
+
+**Response**:
+
+<ResponseField name="slot" type="integer">
+  Slot this transaction was processed in
+</ResponseField>
+
+<ResponseField name="transaction" type="object">
+  Transaction object
+</ResponseField>
+
+<ResponseField name="blockTime" type="integer | null">
+  Estimated production time as Unix timestamp
+</ResponseField>
+
+<ResponseField name="meta" type="object | null">
+  Transaction status metadata
+  
+  <ResponseField name="err" type="object | null">
+    Error if transaction failed, null if succeeded
+  </ResponseField>
+  
+  <ResponseField name="fee" type="integer">
+    Fee in lamports
+  </ResponseField>
+  
+  <ResponseField name="preBalances" type="array">
+    Array of account balances before transaction
+  </ResponseField>
+  
+  <ResponseField name="postBalances" type="array">
+    Array of account balances after transaction
+  </ResponseField>
+  
+  <ResponseField name="logMessages" type="array">
+    Array of log messages
+  </ResponseField>
+</ResponseField>
+
+```bash Request
+curl https://api.devnet.solana.com -X POST -H "Content-Type: application/json" -d '
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "getTransaction",
+  "params": [
+    "2nBhEBYYvfaAe16UMNqRHre4YNSskvuYgx3M6E4JP1oDYvZEJHvoPzyUidNgNX5r9sTyN1J9UxtbCXy2rqYcuyuv",
+    {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0
+    }
+  ]
+}'
+```
+
+---
+
+### sendTransaction
+
+Submits a signed transaction to the cluster for processing.
+
+**Method**: `sendTransaction`
+
+<ParamField path="transaction" type="string" required>
+  Fully-signed transaction as encoded string
+</ParamField>
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="skipPreflight" type="boolean">
+    Skip preflight transaction checks (default: `false`)
+  </ParamField>
+  
+  <ParamField path="preflightCommitment" type="string">
+    Commitment level for preflight (default: `finalized`)
+  </ParamField>
+  
+  <ParamField path="encoding" type="string">
+    Encoding for transaction: `base58`, `base64` (default: `base58`)
+  </ParamField>
+  
+  <ParamField path="maxRetries" type="integer">
+    Maximum retry attempts by RPC node
+  </ParamField>
+  
+  <ParamField path="minContextSlot" type="integer">
+    Minimum slot for preflight checks
+  </ParamField>
+</ParamField>
+
+**Response**:
+
+<ResponseField name="result" type="string">
+  Transaction signature as base-58 encoded string
+</ResponseField>
+
+```bash Request
+curl https://api.devnet.solana.com -X POST -H "Content-Type: application/json" -d '
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "sendTransaction",
+  "params": [
+    "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWWPSAZBZSHptvWRL3BjCvzUXRdKvHL2b7yGrRQcWyaqsaBCncVG7BFggS8w9snUts67BSh3EqKpXLUm5UMHfD7ZBe9GhARjbNQMLJ1QD3Spr6oMTBU6EhdB4RD8CP2xUxr2u3d6fos36PD98XS6oX8TQjLpsMwncs5DAMiD4nNnR8NBfyghGCWvCVifVwvA8B8TJxE1aiyiv2L429BCWfyzAme5sZW8rDb14NeCQHhZbtNqfXhcp2tAnaAT",
+    {
+      "encoding": "base58"
+    }
+  ]
+}'
+```
+
+```json Response
+{
+  "jsonrpc": "2.0",
+  "result": "2id3YC2jK9G5Wo2phDx4gJVAew8DcY5NAojnVuao8rkxwPYPe8cSwE5GzhEgJA2y8fVjDEo6iR6ykBvDxrTQrtpb",
+  "id": 1
+}
+```
+
+---
+
+### simulateTransaction
+
+Simulates sending a transaction without actually submitting it.
+
+**Method**: `simulateTransaction`
+
+<ParamField path="transaction" type="string" required>
+  Transaction as encoded string (need not be signed)
+</ParamField>
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="sigVerify" type="boolean">
+    Whether to verify signatures (default: `false`)
+  </ParamField>
+  
+  <ParamField path="commitment" type="string">
+    Commitment level (default: `finalized`)
+  </ParamField>
+  
+  <ParamField path="encoding" type="string">
+    Encoding: `base58`, `base64` (default: `base58`)
+  </ParamField>
+  
+  <ParamField path="replaceRecentBlockhash" type="boolean">
+    Replace recent blockhash with simulated one (default: `false`)
+  </ParamField>
+  
+  <ParamField path="accounts" type="object">
+    Accounts configuration for returning specific account states
+    
+    <ParamField path="encoding" type="string">
+      Encoding for account data
+    </ParamField>
+    
+    <ParamField path="addresses" type="array">
+      Array of account addresses to return
+    </ParamField>
+  </ParamField>
+  
+  <ParamField path="minContextSlot" type="integer">
+    Minimum slot for simulation
+  </ParamField>
+</ParamField>
+
+**Response**:
+
+<ResponseField name="context" type="object">
+  <ResponseField name="slot" type="integer">
+    Slot simulation was performed at
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="value" type="object">
+  <ResponseField name="err" type="object | null">
+    Error if simulation failed, null if succeeded
+  </ResponseField>
+  
+  <ResponseField name="logs" type="array | null">
+    Array of log messages
+  </ResponseField>
+  
+  <ResponseField name="accounts" type="array | null">
+    Array of accounts (if requested)
+  </ResponseField>
+  
+  <ResponseField name="unitsConsumed" type="integer">
+    Number of compute units consumed
+  </ResponseField>
+  
+  <ResponseField name="returnData" type="object | null">
+    Return data from the transaction
+  </ResponseField>
+</ResponseField>
+
+```bash Request
+curl https://api.devnet.solana.com -X POST -H "Content-Type: application/json" -d '
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "simulateTransaction",
+  "params": [
+    "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAEDArczbMia1tLmq7zz4DinMNN0pJ1JtLdqIJPUw3YrGCzYAMHBsgN27lcgB6H2WQvFgyZuJYHa46puOQo9yQ8CVQbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCp20C7Wj2aiuk5TReAXo+VTVg8QTHjs0UjNMMKCvpzZ+ABAgEBARU=",
+    {
+      "encoding": "base64"
+    }
+  ]
+}'
+```
+
+```json Response
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "context": {
+      "slot": 123456789
+    },
+    "value": {
+      "err": null,
+      "logs": [
+        "Program 11111111111111111111111111111111 invoke [1]",
+        "Program 11111111111111111111111111111111 success"
+      ],
+      "accounts": null,
+      "unitsConsumed": 150,
+      "returnData": null
+    }
+  },
+  "id": 1
+}
+```
+
+---
+
+## Additional Methods
+
+### getMultipleAccounts
+
+Returns account information for multiple accounts (max 100).
+
+**Method**: `getMultipleAccounts`
+
+### getProgramAccounts
+
+Returns all accounts owned by a program.
+
+**Method**: `getProgramAccounts`
+
+### getSignaturesForAddress
+
+Returns confirmed signatures for transactions involving an address.
+
+**Method**: `getSignaturesForAddress`
+
+### getLatestBlockhash
+
+Returns the latest blockhash.
+
+**Method**: `getLatestBlockhash`
+
+### getSlot
+
+Returns the current slot the node is processing.
+
+**Method**: `getSlot`
+
+### getEpochInfo
+
+Returns information about the current epoch.
+
+**Method**: `getEpochInfo`
+
+### getVersion
+
+Returns the current Solana version.
+
+**Method**: `getVersion`
+
+### getHealth
+
+Returns the health status of the node.
+
+**Method**: `getHealth`
+
+---
+
+## Source Code References
+
+The HTTP JSON-RPC methods are implemented in:
+- **Core traits**: `rpc/src/rpc.rs` (lines 2707-3607)
+- **Minimal API**: `rpc_minimal` module (lines 2705-2944)
+- **Full API**: `rpc_full` module (lines 3455-3607)
+- **Accounts API**: `rpc_accounts` module (lines 3157-3285)
+- **Request processor**: `JsonRpcRequestProcessor` structure (lines 235-256)

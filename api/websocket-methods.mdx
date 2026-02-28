@@ -1,0 +1,608 @@
+---
+title: WebSocket Subscription Methods
+description: Real-time event subscriptions via WebSocket in the Agave validator
+---
+
+The Agave validator provides WebSocket-based subscriptions for real-time notifications of blockchain events. This allows clients to receive push notifications instead of polling the HTTP API.
+
+## Connection Setup
+
+### Connecting to WebSocket Endpoint
+
+Connect to the WebSocket endpoint using standard WebSocket protocols:
+
+```javascript
+const ws = new WebSocket('wss://api.devnet.solana.com/');
+
+ws.on('open', () => {
+  // Send subscription request
+});
+
+ws.on('message', (data) => {
+  // Handle notifications
+});
+```
+
+### Connection Management
+
+The WebSocket client automatically handles:
+- **Connection retry**: 5 retries with exponential backoff on `429 Too Many Requests`
+- **Retry-After header**: Respects server-specified retry delay
+- **Ping/Pong**: Automatic keep-alive handling
+- **Reconnection**: Must resubscribe after reconnection
+
+### Subscription Request Format
+
+All subscriptions use JSON-RPC 2.0 format:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "<method>Subscribe",
+  "params": [/* method-specific parameters */]
+}
+```
+
+Subscription response:
+```json
+{
+  "jsonrpc": "2.0",
+  "result": 123456,  // subscription ID
+  "id": 1
+}
+```
+
+### Unsubscribe Request Format
+
+To unsubscribe from events:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "<method>Unsubscribe",
+  "params": [123456]  // subscription ID
+}
+```
+
+## Account Subscriptions
+
+### accountSubscribe
+
+Subscribe to account change notifications.
+
+**Method**: `accountSubscribe`
+
+<ParamField path="pubkey" type="string" required>
+  Account public key as base-58 encoded string
+</ParamField>
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="encoding" type="string">
+    Encoding format: `base58`, `base64`, `base64+zstd`, `jsonParsed`
+  </ParamField>
+  
+  <ParamField path="commitment" type="string">
+    Commitment level: `processed`, `confirmed`, `finalized` (default: `finalized`)
+  </ParamField>
+</ParamField>
+
+**Notification Format**:
+
+<ResponseField name="result" type="object">
+  <ResponseField name="context" type="object">
+    <ResponseField name="slot" type="integer">
+      Slot number of the update
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="value" type="object">
+    Account information
+    
+    <ResponseField name="lamports" type="integer">
+      Account balance in lamports
+    </ResponseField>
+    
+    <ResponseField name="owner" type="string">
+      Account owner program
+    </ResponseField>
+    
+    <ResponseField name="data" type="array | string">
+      Account data
+    </ResponseField>
+    
+    <ResponseField name="executable" type="boolean">
+      Whether account is executable
+    </ResponseField>
+    
+    <ResponseField name="rentEpoch" type="integer">
+      Rent epoch
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+```javascript Request
+const subscriptionRequest = {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "accountSubscribe",
+  "params": [
+    "vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg",
+    {
+      "encoding": "base64",
+      "commitment": "confirmed"
+    }
+  ]
+};
+
+ws.send(JSON.stringify(subscriptionRequest));
+```
+
+```json Notification
+{
+  "jsonrpc": "2.0",
+  "method": "accountNotification",
+  "params": {
+    "result": {
+      "context": {
+        "slot": 123456789
+      },
+      "value": {
+        "lamports": 1000000000,
+        "owner": "11111111111111111111111111111111",
+        "data": ["", "base64"],
+        "executable": false,
+        "rentEpoch": 361
+      }
+    },
+    "subscription": 123456
+  }
+}
+```
+
+**Unsubscribe**: `accountUnsubscribe`
+
+---
+
+## Log Subscriptions
+
+### logsSubscribe
+
+Subscribe to transaction log notifications.
+
+**Method**: `logsSubscribe`
+
+<ParamField path="filter" type="object | string" required>
+  Filter criteria:
+  - `"all"`: All transactions
+  - `"allWithVotes"`: All transactions including votes
+  - `{"mentions": ["address"]}`: Transactions mentioning address
+</ParamField>
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="commitment" type="string">
+    Commitment level (default: `finalized`)
+  </ParamField>
+</ParamField>
+
+**Notification Format**:
+
+<ResponseField name="result" type="object">
+  <ResponseField name="context" type="object">
+    <ResponseField name="slot" type="integer">
+      Slot number
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="value" type="object">
+    <ResponseField name="signature" type="string">
+      Transaction signature
+    </ResponseField>
+    
+    <ResponseField name="err" type="object | null">
+      Error if transaction failed
+    </ResponseField>
+    
+    <ResponseField name="logs" type="array">
+      Array of log messages
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+```javascript Request
+const subscriptionRequest = {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "logsSubscribe",
+  "params": [
+    {
+      "mentions": ["11111111111111111111111111111111"]
+    },
+    {
+      "commitment": "confirmed"
+    }
+  ]
+};
+
+ws.send(JSON.stringify(subscriptionRequest));
+```
+
+```json Notification
+{
+  "jsonrpc": "2.0",
+  "method": "logsNotification",
+  "params": {
+    "result": {
+      "context": {
+        "slot": 123456789
+      },
+      "value": {
+        "signature": "5h6xBEauJ3PK6SWCZ1PGjBvj8vDdWG3KpwATGy1ARAXFSDwt8GFXM7W5Ncn16wmqokgpiKRLuS83KUxyZyv2sUYv",
+        "err": null,
+        "logs": [
+          "Program 11111111111111111111111111111111 invoke [1]",
+          "Program 11111111111111111111111111111111 success"
+        ]
+      }
+    },
+    "subscription": 123456
+  }
+}
+```
+
+**Unsubscribe**: `logsUnsubscribe`
+
+---
+
+## Signature Subscriptions
+
+### signatureSubscribe
+
+Subscribe to notifications when a transaction with the given signature reaches specified commitment level.
+
+**Method**: `signatureSubscribe`
+
+<ParamField path="signature" type="string" required>
+  Transaction signature as base-58 encoded string
+</ParamField>
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="commitment" type="string">
+    Commitment level: `processed`, `confirmed`, `finalized` (default: `finalized`)
+  </ParamField>
+  
+  <ParamField path="enableReceivedNotification" type="boolean">
+    Enable received notification (default: `false`)
+  </ParamField>
+</ParamField>
+
+**Notification Format**:
+
+<ResponseField name="result" type="object">
+  <ResponseField name="context" type="object">
+    <ResponseField name="slot" type="integer">
+      Slot number
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="value" type="object">
+    <ResponseField name="err" type="object | null">
+      Error if transaction failed, null if succeeded
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+```javascript Request
+const subscriptionRequest = {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "signatureSubscribe",
+  "params": [
+    "2nBhEBYYvfaAe16UMNqRHre4YNSskvuYgx3M6E4JP1oDYvZEJHvoPzyUidNgNX5r9sTyN1J9UxtbCXy2rqYcuyuv",
+    {
+      "commitment": "confirmed"
+    }
+  ]
+};
+
+ws.send(JSON.stringify(subscriptionRequest));
+```
+
+```json Notification
+{
+  "jsonrpc": "2.0",
+  "method": "signatureNotification",
+  "params": {
+    "result": {
+      "context": {
+        "slot": 123456789
+      },
+      "value": {
+        "err": null
+      }
+    },
+    "subscription": 123456
+  }
+}
+```
+
+**Unsubscribe**: `signatureUnsubscribe`
+
+<Note>
+  The subscription is automatically removed once the notification is sent.
+</Note>
+
+---
+
+## Slot Subscriptions
+
+### slotSubscribe
+
+Subscribe to slot change notifications.
+
+**Method**: `slotSubscribe`
+
+No parameters required.
+
+**Notification Format**:
+
+<ResponseField name="result" type="object">
+  <ResponseField name="parent" type="integer">
+    Parent slot number
+  </ResponseField>
+  
+  <ResponseField name="root" type="integer">
+    Current root slot
+  </ResponseField>
+  
+  <ResponseField name="slot" type="integer">
+    Current slot
+  </ResponseField>
+</ResponseField>
+
+```javascript Request
+const subscriptionRequest = {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "slotSubscribe"
+};
+
+ws.send(JSON.stringify(subscriptionRequest));
+```
+
+```json Notification
+{
+  "jsonrpc": "2.0",
+  "method": "slotNotification",
+  "params": {
+    "result": {
+      "parent": 123456788,
+      "root": 123456700,
+      "slot": 123456789
+    },
+    "subscription": 123456
+  }
+}
+```
+
+**Unsubscribe**: `slotUnsubscribe`
+
+---
+
+## Program Subscriptions
+
+### programSubscribe
+
+Subscribe to account changes for accounts owned by a program.
+
+**Method**: `programSubscribe`
+
+<ParamField path="programId" type="string" required>
+  Program public key as base-58 encoded string
+</ParamField>
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="encoding" type="string">
+    Encoding format for account data
+  </ParamField>
+  
+  <ParamField path="commitment" type="string">
+    Commitment level
+  </ParamField>
+  
+  <ParamField path="filters" type="array">
+    Array of filter objects (same as getProgramAccounts)
+  </ParamField>
+</ParamField>
+
+**Notification Format**:
+
+<ResponseField name="result" type="object">
+  <ResponseField name="context" type="object">
+    <ResponseField name="slot" type="integer">
+      Slot number
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="value" type="object">
+    <ResponseField name="pubkey" type="string">
+      Account public key
+    </ResponseField>
+    
+    <ResponseField name="account" type="object">
+      Account information (same format as getAccountInfo)
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+```javascript Request
+const subscriptionRequest = {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "programSubscribe",
+  "params": [
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    {
+      "encoding": "base64",
+      "commitment": "confirmed"
+    }
+  ]
+};
+
+ws.send(JSON.stringify(subscriptionRequest));
+```
+
+**Unsubscribe**: `programUnsubscribe`
+
+---
+
+## Additional Subscriptions
+
+### slotsUpdatesSubscribe
+
+Subscribe to slot update notifications (more granular than `slotSubscribe`).
+
+**Method**: `slotsUpdatesSubscribe`
+
+Provides notifications for:
+- `firstShredReceived`: First shred received for slot
+- `completed`: All shreds received for slot
+- `createdBank`: Bank created for slot
+- `frozen`: Bank frozen
+- `dead`: Slot marked as dead
+- `optimisticConfirmation`: Slot optimistically confirmed
+- `root`: Slot rooted
+
+**Unsubscribe**: `slotsUpdatesUnsubscribe`
+
+---
+
+### blockSubscribe
+
+Subscribe to block notifications.
+
+**Method**: `blockSubscribe`
+
+<ParamField path="filter" type="string" required>
+  Filter type: `"all"` or `"mentionsAccountOrProgram"`
+</ParamField>
+
+<ParamField path="config" type="object">
+  Configuration object
+  
+  <ParamField path="commitment" type="string">
+    Commitment level (default: `finalized`)
+  </ParamField>
+  
+  <ParamField path="encoding" type="string">
+    Transaction encoding
+  </ParamField>
+  
+  <ParamField path="transactionDetails" type="string">
+    Level of transaction detail
+  </ParamField>
+  
+  <ParamField path="showRewards" type="boolean">
+    Whether to show rewards
+  </ParamField>
+  
+  <ParamField path="maxSupportedTransactionVersion" type="integer">
+    Max transaction version
+  </ParamField>
+</ParamField>
+
+**Unsubscribe**: `blockUnsubscribe`
+
+<Warning>
+  Block subscriptions are **disabled by default** on RPC nodes. Enable with:
+  ```bash
+  agave-validator --rpc-pubsub-enable-block-subscription
+  ```
+</Warning>
+
+---
+
+### voteSubscribe
+
+Subscribe to vote transaction notifications.
+
+**Method**: `voteSubscribe`
+
+**Unsubscribe**: `voteUnsubscribe`
+
+<Warning>
+  Vote subscriptions are **disabled by default** on RPC nodes. Enable with:
+  ```bash
+  agave-validator --rpc-pubsub-enable-vote-subscription
+  ```
+</Warning>
+
+---
+
+### rootSubscribe
+
+Subscribe to root change notifications.
+
+**Method**: `rootSubscribe`
+
+**Notification**: Receives the new root slot as an integer.
+
+**Unsubscribe**: `rootUnsubscribe`
+
+---
+
+## Best Practices
+
+### Resource Management
+
+1. **Unsubscribe when done**: Always unsubscribe to free server resources
+2. **Limit concurrent subscriptions**: Each subscription consumes server resources
+3. **Use appropriate commitment levels**: Lower commitment = more updates
+4. **Handle reconnections**: Resubscribe after WebSocket reconnection
+
+### Error Handling
+
+```javascript
+ws.on('error', (error) => {
+  console.error('WebSocket error:', error);
+  // Implement reconnection logic
+});
+
+ws.on('close', () => {
+  console.log('WebSocket closed');
+  // Reconnect and resubscribe
+});
+```
+
+### Notification Processing
+
+```javascript
+ws.on('message', (data) => {
+  const notification = JSON.parse(data);
+  
+  if (notification.method === 'accountNotification') {
+    // Handle account update
+  } else if (notification.method === 'logsNotification') {
+    // Handle logs
+  }
+});
+```
+
+---
+
+## Source Code References
+
+WebSocket subscription methods are implemented in:
+- **PubSub trait**: `rpc/src/rpc_pubsub.rs` (lines 50-250)
+- **Internal trait**: `RpcSolPubSubInternal` module (lines 255-300)
+- **Client implementation**: `pubsub-client/src/pubsub_client.rs`
+- **Subscription types**: Lines 266-304 in `pubsub_client.rs`

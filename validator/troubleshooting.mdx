@@ -1,0 +1,710 @@
+---
+title: Troubleshooting
+description: Common issues and solutions, debugging techniques, log analysis, and recovery procedures for Agave validators.
+---
+
+This guide covers common issues you may encounter when running an Agave validator and how to resolve them.
+
+## Getting Help
+
+There is a `#validator-support` Discord channel available to reach other validators and get help:
+
+- [Discord Server](https://solana.com/discord)
+  - `#validator-support` - General support channel for any validator related queries
+  - `#testnet-announcements` - Critical information relating to Testnet
+
+### Useful Resources
+
+- [Network Explorer](http://explorer.solana.com/)
+- [Testnet Metrics Dashboard](https://metrics.solana.com:3000/d/monitor-edge/cluster-telemetry-edge?refresh=60s&orgId=2)
+- [Core software repo](https://github.com/solana-labs/solana)
+
+## Common Startup Issues
+
+### Validator Won't Start
+
+#### Check System Tuning
+
+Your validator may not start without proper system tuning. Verify these settings are applied:
+
+```bash
+# Check sysctl settings
+sysctl net.core.rmem_max
+sysctl net.core.wmem_max
+sysctl vm.max_map_count
+sysctl fs.nr_open
+```
+
+Expected values:
+```
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+vm.max_map_count = 1000000
+fs.nr_open = 1000000
+```
+
+If values are incorrect, reapply system tuning:
+
+```bash
+sudo sysctl -p /etc/sysctl.d/21-agave-validator.conf
+```
+
+#### Check File Limits
+
+Verify file descriptor limits:
+
+```bash
+ulimit -n
+```
+
+Should return `1000000`. If not, check `/etc/security/limits.d/90-solana-nofiles.conf` and log out/in again.
+
+#### Check Disk Space
+
+Verify sufficient disk space:
+
+```bash
+df -h
+```
+
+Ensure your ledger and accounts directories have at least 500GB free.
+
+#### Check Permissions
+
+Verify the sol user has proper permissions:
+
+```bash
+ls -la /mnt/ledger
+ls -la /mnt/accounts
+ls -la ~/validator-keypair.json
+```
+
+Fix permissions if needed:
+
+```bash
+sudo chown -R sol:sol /mnt/ledger
+sudo chown -R sol:sol /mnt/accounts
+chmod 600 ~/validator-keypair.json
+```
+
+### Invalid Genesis Hash
+
+If you see errors about genesis hash mismatch, you may have the wrong genesis for the cluster.
+
+<Warning>
+Delete your ledger directory and restart the validator to download the correct genesis.
+</Warning>
+
+```bash
+# Stop validator
+sudo systemctl stop sol
+
+# Remove ledger data
+rm -rf /mnt/ledger/*
+
+# Start validator
+sudo systemctl start sol
+```
+
+### Failed to Bind Port
+
+If you see "Address already in use" errors:
+
+```bash
+# Check what's using the port
+sudo netstat -tunlp | grep 8899
+
+# Kill the process if needed
+sudo kill <PID>
+```
+
+Or change the port in your validator startup script:
+
+```bash
+--rpc-port 8900
+--dynamic-port-range 9000-9020
+```
+
+## Catchup and Sync Issues
+
+### Validator Not Catching Up
+
+If your validator is not catching up to the cluster:
+
+<Steps>
+
+### Check if Validator is Running
+
+```bash
+ps aux | grep agave-validator
+```
+
+### Check Network Connectivity
+
+Verify you can reach the cluster:
+
+```bash
+solana gossip | head -20
+```
+
+If this hangs or returns no results, check your network connection and firewall rules.
+
+### Check Catchup Status
+
+```bash
+solana catchup <VALIDATOR_PUBKEY>
+```
+
+If the slot difference is increasing, your validator is falling further behind.
+
+### Check System Resources
+
+Verify CPU, memory, and disk are not maxed out:
+
+```bash
+top
+iostat -x 1
+df -h
+```
+
+### Review Logs
+
+Check for errors in the logs:
+
+```bash
+tail -f /home/sol/agave-validator.log | grep -i error
+```
+
+### Try Downloading a Fresh Snapshot
+
+If your validator is very far behind, download a fresh snapshot:
+
+```bash
+# Stop validator
+sudo systemctl stop sol
+
+# Remove --no-snapshot-fetch flag from validator.sh
+# Or delete ledger to force fresh download
+rm -rf /mnt/ledger/*
+
+# Start validator
+sudo systemctl start sol
+```
+
+</Steps>
+
+### Slow Catchup Speed
+
+If your validator is catching up but slowly:
+
+#### Check Network Bandwidth
+
+```bash
+iftop
+```
+
+Ensure you're not saturating your network connection. Staked validators should have at least 2 Gbps, preferably 10 Gbps.
+
+#### Check Disk I/O
+
+```bash
+iostat -x 1
+```
+
+Look at `%util` and `await` for your NVMe drives. If consistently at 100% utilization or high await times, you may have a disk bottleneck.
+
+#### Verify Using NVMe Drives
+
+Ensure accounts and ledger are on separate NVMe drives:
+
+```bash
+lsblk
+```
+
+### Falling Behind After Catchup
+
+If your validator catches up but then falls behind again:
+
+#### Check PoH Speed
+
+Look for PoH (Proof of History) performance in logs:
+
+```bash
+grep "PoH" /home/sol/agave-validator.log | tail -20
+```
+
+If PoH hashes/second is slower than the cluster target:
+
+```bash
+# Set CPU to performance mode
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+
+# Check CPU frequency
+lscpu | grep MHz
+```
+
+#### Verify Release Build
+
+If built from source, ensure you're using a release build:
+
+```bash
+agave-validator --version
+```
+
+Rebuild with release flag if needed:
+
+```bash
+cargo build --release
+```
+
+## Performance Issues
+
+### High Skip Rate
+
+A high skip rate indicates your validator is missing votes on blocks.
+
+#### Check Validator Performance
+
+```bash
+solana validators | grep <VALIDATOR_PUBKEY>
+```
+
+Look at the skip rate column. A consistently high skip rate (>5%) indicates issues.
+
+#### Common Causes
+
+1. **Network issues** - Poor connectivity to other validators
+2. **CPU performance** - CPU not fast enough or throttled
+3. **Disk I/O** - Slow disk causing delays
+4. **Memory pressure** - Insufficient RAM causing swapping
+5. **System clock drift** - System clock out of sync
+
+#### Solutions
+
+Check system clock:
+
+```bash
+timedatectl
+```
+
+Sync time if needed:
+
+```bash
+sudo systemctl restart systemd-timesyncd
+```
+
+Check for swap usage:
+
+```bash
+free -h
+```
+
+If swapping, you need more RAM.
+
+### Not Producing Blocks During Leader Slots
+
+If you're missing your leader slots:
+
+#### Verify You're in Leader Schedule
+
+```bash
+solana leader-schedule | grep <VALIDATOR_PUBKEY>
+```
+
+#### Check Logs During Leader Slot
+
+Look for errors during your leader slots:
+
+```bash
+grep "leader slot" /home/sol/agave-validator.log
+```
+
+#### Ensure Validator is Caught Up
+
+```bash
+solana catchup <VALIDATOR_PUBKEY>
+```
+
+You must be caught up to produce blocks.
+
+## Vote and Stake Issues
+
+### Not Voting
+
+If your validator is not voting:
+
+#### Check Vote Account Status
+
+```bash
+solana vote-account <VOTE_ACCOUNT_PUBKEY>
+```
+
+Verify it shows recent vote activity.
+
+#### Check Identity Account Balance
+
+```bash
+solana balance ~/validator-keypair.json
+```
+
+<Warning>
+If balance is too low, your validator cannot afford vote transaction fees and will stop voting.
+</Warning>
+
+Fund your identity account:
+
+```bash
+solana transfer <VALIDATOR_IDENTITY_PUBKEY> 10
+```
+
+#### Verify Vote Account Configuration
+
+Check that your validator is using the correct vote account:
+
+```bash
+ps aux | grep agave-validator | grep vote-account
+```
+
+### Delinquent Validator
+
+If your validator shows as delinquent:
+
+```bash
+solana validators --delinquent
+```
+
+This means your validator has fallen behind and is not voting.
+
+#### Recovery Steps
+
+<Steps>
+
+### Check if Running
+
+```bash
+sudo systemctl status sol
+```
+
+### Check Logs for Errors
+
+```bash
+tail -100 /home/sol/agave-validator.log
+```
+
+### Verify Network Connectivity
+
+```bash
+solana gossip | grep <VALIDATOR_PUBKEY>
+```
+
+### Check System Resources
+
+```bash
+top
+df -h
+```
+
+### Restart if Needed
+
+```bash
+agave-validator exit --max-delinquent-stake 40
+```
+
+</Steps>
+
+### Stake Not Activating
+
+If you've delegated stake but it's not activating:
+
+#### Verify Stake Account
+
+```bash
+solana stake-account <STAKE_ACCOUNT_PUBKEY>
+```
+
+Check the "Delegated Stake" and "Activating Stake" fields.
+
+#### Check Epoch
+
+Stake activates at epoch boundaries. Check current epoch:
+
+```bash
+solana epoch-info
+```
+
+Stake will activate at the next epoch boundary and warm up over several epochs.
+
+#### Verify Vote Account
+
+Ensure stake is delegated to the correct vote account:
+
+```bash
+solana stake-account <STAKE_ACCOUNT_PUBKEY> | grep "Delegated Vote Account"
+```
+
+## Disk and Storage Issues
+
+### Out of Disk Space
+
+If you run out of disk space:
+
+```bash
+df -h
+```
+
+#### Clean Up Snapshots
+
+Remove old snapshots if space is tight:
+
+```bash
+du -sh /mnt/ledger/snapshots/*
+rm /mnt/ledger/snapshots/snapshot-*.tar.zst
+```
+
+<Note>
+Keep at least the most recent snapshot for faster restart.
+</Note>
+
+#### Verify --limit-ledger-size
+
+Ensure your validator startup script includes:
+
+```bash
+--limit-ledger-size
+```
+
+This automatically prunes old ledger data.
+
+### Corrupted Blockstore
+
+If you see blockstore corruption errors:
+
+```bash
+grep -i corrupt /home/sol/agave-validator.log
+```
+
+#### Use WAL Recovery
+
+Add to your validator startup script:
+
+```bash
+--wal-recovery-mode skip_any_corrupted_record
+```
+
+#### Last Resort: Clean Ledger
+
+If corruption is severe:
+
+```bash
+sudo systemctl stop sol
+rm -rf /mnt/ledger/*
+sudo systemctl start sol
+```
+
+## Blockstore Management
+
+The validator blockstore rocksdb database can be inspected using the `ldb` tool. `ldb` is part of the `rocksdb` code base and is also available in the `rocksdb-tools` package.
+
+### List Column Families
+
+```bash
+ldb --db=/mnt/ledger/rocksdb/ list_column_families
+```
+
+### Downgrade Issues
+
+If a new column family has been introduced to the validator blockstore, a subsequent downgrade of the validator to a version that predates the new column family will cause the validator to fail while opening the blockstore during startup.
+
+<Warning>
+Please seek guidance on Discord before modifying the validator blockstore.
+</Warning>
+
+### Drop Column Family
+
+Only do this if you understand the implications:
+
+```bash
+ldb --db=/mnt/ledger/rocksdb drop_column_family <column_family_name>
+```
+
+## Network Issues
+
+### Not Appearing in Gossip
+
+If your validator doesn't appear in gossip:
+
+```bash
+solana gossip | grep <VALIDATOR_PUBKEY>
+```
+
+#### Check Firewall
+
+Verify firewall allows P2P ports:
+
+```bash
+sudo ufw status
+```
+
+Should show ports 8000-8020 (or your custom range) allowed for TCP and UDP.
+
+#### Check Entrypoints
+
+Verify entrypoints are reachable:
+
+```bash
+telnet entrypoint.testnet.solana.com 8001
+```
+
+#### Verify Public IP
+
+Ensure your validator has a public IP:
+
+```bash
+curl ifconfig.me
+```
+
+This should match the IP shown when you eventually appear in gossip.
+
+### High Latency to Peers
+
+If you have high network latency:
+
+```bash
+solana gossip | grep <VALIDATOR_PUBKEY>
+```
+
+Check the datacenter distribution. If you're geographically isolated from other validators, you may experience higher latency.
+
+## Log Analysis Techniques
+
+### Finding Errors
+
+```bash
+# Recent errors
+grep -i error /home/sol/agave-validator.log | tail -50
+
+# Errors in last hour
+find /home/sol -name "agave-validator.log*" -mmin -60 -exec grep -i error {} \;
+```
+
+### Finding Specific Events
+
+```bash
+# Leader slots
+grep "My next leader slot" /home/sol/agave-validator.log
+
+# Vote activity
+grep "voted" /home/sol/agave-validator.log | tail -20
+
+# Snapshot downloads
+grep -i snapshot /home/sol/agave-validator.log | grep -i download
+```
+
+### Analyzing Restarts
+
+```bash
+# Find all restarts
+grep "Starting validator" /home/sol/agave-validator.log*
+
+# Check version at each restart
+grep -B1 "Starting validator with" /home/sol/agave-validator.log*
+```
+
+## Recovery Procedures
+
+### Complete Fresh Start
+
+If all else fails, start completely fresh:
+
+<Steps>
+
+### Stop Validator
+
+```bash
+sudo systemctl stop sol
+```
+
+### Backup Configuration
+
+```bash
+cp /home/sol/bin/validator.sh /home/sol/bin/validator.sh.backup
+cp /home/sol/validator-keypair.json /home/sol/validator-keypair.json.backup
+```
+
+### Clear All Data
+
+```bash
+rm -rf /mnt/ledger/*
+rm -rf /mnt/accounts/*
+```
+
+### Start Validator
+
+```bash
+sudo systemctl start sol
+```
+
+### Monitor Logs
+
+```bash
+tail -f /home/sol/agave-validator.log
+```
+
+### Wait for Catchup
+
+```bash
+solana catchup <VALIDATOR_PUBKEY>
+```
+
+</Steps>
+
+### Emergency Contacts
+
+If you experience critical issues:
+
+1. Check Discord `#validator-support`
+2. Review [GitHub issues](https://github.com/solana-labs/solana/issues)
+3. Check [Status page](https://status.solana.com/) for cluster-wide issues
+
+## Preventive Measures
+
+### Regular Health Checks
+
+Schedule regular health checks:
+
+```bash
+# Create a health check script
+cat > /home/sol/health-check.sh <<'EOF'
+#!/bin/bash
+echo "=== Validator Health Check ==="
+echo "Validator Status:"
+solana validators | grep $(solana-keygen pubkey ~/validator-keypair.json)
+echo ""
+echo "Balance:"
+solana balance ~/validator-keypair.json
+echo ""
+echo "Recent Votes:"
+solana vote-account ~/vote-account-keypair.json | head -20
+echo ""
+echo "Disk Usage:"
+df -h | grep /mnt
+EOF
+
+chmod +x /home/sol/health-check.sh
+```
+
+### Set Up Monitoring
+
+Always run agave-watchtower on a separate machine to monitor your validator.
+
+### Document Your Setup
+
+Keep documentation of:
+
+- Startup script configuration
+- System tuning settings
+- Network configuration
+- Recovery procedures
+- Contact information for support
+
+This helps you and others troubleshoot issues faster.

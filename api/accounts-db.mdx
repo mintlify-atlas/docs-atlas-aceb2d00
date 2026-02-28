@@ -1,0 +1,228 @@
+---
+title: "AccountsDB"
+description: "Persistent account storage and indexing system in Agave validator"
+---
+
+## Overview
+
+AccountsDB is Agave's high-performance persistent storage system for account data. It provides concurrent append-only writes with parallel reads, using memory-mapped files for efficient data access. The architecture supports rapid account lookups, snapshot generation, and efficient storage reclamation.
+
+## Architecture
+
+### Core Components
+
+AccountsDB consists of several integrated subsystems:
+
+**AccountsDb** (`accounts-db/src/accounts_db.rs`): The main storage engine that manages persistent account data across memory-mapped append-vec files.
+
+**AccountsIndex** (`accounts-db/src/accounts_index.rs`): In-memory and disk-backed index mapping pubkeys to account storage locations, supporting both cached and persistent modes.
+
+**AccountsCache** (`accounts-db/src/accounts_cache.rs`): Write-through cache for recently modified accounts before they're flushed to persistent storage.
+
+**Accounts** (`accounts-db/src/accounts.rs`): Synchronization layer handling account locks and coordinating access between AccountsDB and the index.
+
+### Storage Model
+
+Accounts are stored in **AppendVec** files with the following characteristics:
+
+- Each AppendVec stores accounts for a single slot
+- Concurrent single-thread append with many concurrent readers
+- Memory-mapped files for zero-copy access
+- Stored at path: `<path>/<pid>/data/`
+
+The system tracks updates using a global atomic `write_version` counter. Each commit increments this version, allowing the index to identify the latest account state across multiple slots.
+
+```
+Persistent Store Layout:
+  accounts_db/
+    ├── accounts/
+    │   ├── 0.0      # AppendVec for slot 0
+    │   ├── 1.0      # AppendVec for slot 1
+    │   └── ...
+    └── index/       # Persistent index data (optional)
+```
+
+## Account Indexing
+
+### Index Structure
+
+The AccountsIndex maps `Pubkey -> SlotList<AccountInfo>` where:
+
+- **SlotList**: SmallVec of `(Slot, AccountInfo)` tuples tracking account versions
+- **AccountInfo**: Contains storage location (offset, storage ID) and metadata
+- **RefCount**: Tracks number of storages containing the account (typically 1)
+
+The index supports two operational modes:
+
+**In-Memory Only** (`IndexLimit::InMemOnly`): All index data kept in RAM for maximum performance.
+
+**Disk-Backed** (`IndexLimit::Limit`): Less-frequently-accessed entries evicted to disk, reducing memory pressure.
+
+### Index Configuration
+
+Key parameters defined in `accounts_index.rs:58-75`:
+
+- `BINS_DEFAULT: 8192` - Number of bins for sharding the index
+- `BINS_FOR_TESTING: 2` - Reduced bins for test environments
+- Default write cache limit: 15GB (`WRITE_CACHE_LIMIT_BYTES_DEFAULT`)
+
+### Scanning and Iteration
+
+AccountsIndex supports flexible scanning with configurable filters:
+
+```rust
+pub enum ScanFilter {
+    All,                      // Scan both in-memory and on-disk
+    OnlyAbnormal,             // Skip normal entries (ref_count=1, slot_list.len=1)
+    OnlyAbnormalWithVerify,   // Verify on-disk entries are abnormal
+    OnlyAbnormalTest,         // Simulate uncached disk index
+}
+
+pub enum ScanOrder {
+    Unsorted,  // Fastest, no ordering guarantees
+    Sorted,    // Ordered by pubkey
+}
+```
+
+## Snapshot and Account Loading
+
+### Snapshot Generation
+
+AccountsDB generates snapshots containing:
+
+1. **Account Storage**: All active AppendVec files
+2. **Index State**: Metadata for reconstructing the accounts index
+3. **Bank State**: Slot, parent relationships, and bank metadata
+
+Snapshots enable fast validator bootstrapping without replaying the entire ledger.
+
+### Account Loading Process
+
+When loading accounts for transaction processing:
+
+1. **Index Lookup**: Query AccountsIndex for account location
+2. **Storage Access**: Read from memory-mapped AppendVec at specified offset
+3. **Cache Check**: Check AccountsCache for recent modifications
+4. **Ancestor Search**: Walk slot ancestry until account found
+
+The system uses `Ancestors` (set of parent slots) to determine account visibility at any point in the chain.
+
+## Storage Management
+
+### Shrinking and Compaction
+
+AccountsDB reclaims space through **shrinking**:
+
+- Identifies storages with significant dead accounts
+- Copies alive accounts to new AppendVec
+- Updates index to point to new locations
+- Deletes old storage files
+
+Shrinking is triggered when:
+- Storage utilization falls below threshold
+- Periodic cleanup intervals elapse
+
+Reference counts guide shrinking decisions:
+- `ref_count = 1`: Account exists in only one storage
+- `ref_count > 1`: Account duplicated across storages (older versions exist)
+
+See `ShrinkCollectAliveSeparatedByRefs` structure at `accounts_db.rs:145-152` for reference count categorization.
+
+### Ancient Append Vecs
+
+Older storages are converted to **ancient** format:
+- Larger file sizes for better storage efficiency
+- Special handling during shrink operations
+- Separate retention policies
+
+### Cleanup and Purging
+
+The system tracks obsolete accounts and reclaims storage:
+
+- **Dead accounts**: Accounts with zero lamports or overwritten
+- **Rooted slots**: Only clean slots that are finalized
+- **Background service**: `AccountsBackgroundService` performs periodic cleanup
+
+## Concurrency and Locking
+
+### Account Locks
+
+The `AccountLocks` structure (`accounts.rs:69`) manages read/write locks:
+
+- **Read locks**: Multiple concurrent readers allowed
+- **Write locks**: Exclusive access required
+- **Validation**: `validate_account_locks` ensures transaction conflicts are detected
+
+Locks are held only during transaction processing, not storage operations.
+
+### Write Cache
+
+The write cache (`AccountsCache`) provides:
+
+- Per-slot caching of modified accounts
+- Lock-free reads from cache
+- Periodic flushing to persistent storage
+- Configurable size limits (default 15GB)
+
+When the cache exceeds limits, the oldest slots are flushed to AppendVec files.
+
+## Performance Optimizations
+
+### Parallel Processing
+
+AccountsDB leverages parallelism extensively:
+
+- **Parallel scanning**: Use Rayon for multi-threaded account scans
+- **Concurrent storage access**: Memory-mapped files enable lock-free reads
+- **Sharded index**: `BINS_DEFAULT = 8192` bins reduce lock contention
+
+### Memory Management
+
+- **Memory-mapped I/O**: Zero-copy access to account data
+- **`io_uring` support**: Asynchronous I/O for large operations (configurable)
+- **Buffer limits**: `TOTAL_IO_URING_BUFFERS_SIZE_LIMIT = 2GB`
+
+### Index Optimization
+
+- **SmallVec for SlotList**: Optimize for common case (single slot)
+- **Disk eviction**: Move cold index data to disk to reduce RAM
+- **Sharding**: 8192 bins reduce lock contention on index updates
+
+## Configuration
+
+### AccountsDbConfig
+
+Key configuration options in `AccountsDbConfig`:
+
+```rust
+pub struct AccountsDbConfig {
+    pub index: AccountsIndexConfig,
+    pub accounts_hash_cache_path: Option<PathBuf>,
+    pub filler_accounts_config: FillerAccountsConfig,
+    pub write_cache_limit_bytes: Option<u64>,
+    pub ancient_append_vec_offset: Option<i64>,
+    // ... additional fields
+}
+```
+
+### Testing Configuration
+
+Predefined configs for testing:
+
+- `ACCOUNTS_DB_CONFIG_FOR_TESTING`: Minimal configuration with 2 bins
+- `ACCOUNTS_DB_CONFIG_FOR_BENCHMARKS`: Production-like with 8192 bins
+
+## Key Files
+
+- `accounts_db.rs:1-200` - Main AccountsDB implementation and storage logic
+- `accounts_index.rs:1-200` - Index structure and account lookup
+- `accounts.rs:1-150` - Synchronization and lock management
+- `accounts_cache.rs` - Write-through cache for hot accounts
+- `account_storage.rs` - AppendVec file management
+- `account_info.rs` - AccountInfo metadata structure
+
+## Related Components
+
+- **Runtime/Bank**: Primary consumer of AccountsDB for transaction processing
+- **Snapshots**: Generate and load snapshots from AccountsDB state
+- **AccountsBackgroundService**: Asynchronous cleanup and maintenance

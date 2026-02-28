@@ -1,0 +1,499 @@
+---
+title: Wallet Management with Solana CLI
+description: Create and manage Solana wallets using the command-line tools, including keypair generation, paper wallets, file system wallets, and hardware wallet integration.
+---
+
+## Overview
+
+Solana CLI supports several wallet types for managing keypairs and signing transactions:
+
+- **File System Wallets** - Unencrypted keypair files stored on disk
+- **Paper Wallets** - Seed phrases written on paper for offline storage
+- **Hardware Wallets** - Physical devices (Ledger, Trezor) for secure key storage
+
+Before using any wallet type, ensure you have [installed the Solana CLI tools](/cli/installation).
+
+## solana-keygen Tool
+
+The `solana-keygen` tool provides all keypair generation and management functionality:
+
+```bash
+solana-keygen --help
+```
+
+### Common Commands
+
+- `new` - Generate a new keypair
+- `pubkey` - Display or recover a public key
+- `verify` - Verify keypair ownership
+- `recover` - Recover keypair from seed phrase
+- `grind` - Generate vanity addresses
+
+## File System Wallets
+
+File system wallets store keypairs as JSON files on your computer.
+
+<Warning>
+File system wallets are **unencrypted** and the least secure storage method. Only use them for small amounts or on secure, isolated systems.
+</Warning>
+
+### Generate a File System Keypair
+
+<Steps>
+  <Step title="Create directory">
+    ```bash
+    mkdir ~/my-solana-wallet
+    ```
+  </Step>
+
+  <Step title="Generate keypair">
+    ```bash
+    solana-keygen new --outfile ~/my-solana-wallet/my-keypair.json
+    ```
+    
+    You'll be prompted to enter a passphrase. This passphrase protects the **recovery seed phrase**, not the file itself.
+  </Step>
+
+  <Step title="View public key">
+    Display the wallet address:
+    
+    ```bash
+    solana-keygen pubkey ~/my-solana-wallet/my-keypair.json
+    ```
+    
+    Output:
+    ```text
+    ErRr1caKzK8nn4xmEWtimYRiTCAZXjBtVphuZ5vMKy
+    ```
+  </Step>
+</Steps>
+
+### Verify Keypair
+
+Verify you control the private key for an address:
+
+```bash
+solana-keygen verify <PUBKEY> ~/my-solana-wallet/my-keypair.json
+```
+
+Output on success:
+```text
+Success
+```
+
+### Multiple Keypairs
+
+Create multiple keypairs by specifying different output files:
+
+```bash
+solana-keygen new --outfile ~/my-solana-wallet/keypair-1.json
+solana-keygen new --outfile ~/my-solana-wallet/keypair-2.json
+solana-keygen new --outfile ~/my-solana-wallet/keypair-3.json
+```
+
+### Security Considerations
+
+- Files are stored **unencrypted** on disk
+- Malware could access keypair files
+- Use encrypted storage (FileVault on MacOS, BitLocker on Windows)
+- Never share keypair files
+- Keep backups in secure locations
+- Use hardware wallets for large amounts
+
+## Paper Wallets
+
+Paper wallets use BIP39-compliant seed phrases that can be written on paper for offline storage.
+
+### Generate a Paper Wallet
+
+<Steps>
+  <Step title="Generate without output file">
+    Use the `--no-outfile` flag to generate a paper wallet:
+    
+    ```bash
+    solana-keygen new --no-outfile
+    ```
+    
+    <Note>
+    Omitting `--no-outfile` creates a file system wallet at `~/.config/solana/id.json`.
+    </Note>
+  </Step>
+
+  <Step title="Enter passphrase">
+    The tool prompts for an optional passphrase:
+    
+    ```text
+    Generating a new keypair
+    For added security, enter a BIP39 passphrase
+    NOTE! This passphrase improves security of the recovery seed phrase NOT the
+    keypair file itself, which is stored as insecure plain text
+    BIP39 Passphrase (empty for none):
+    ```
+    
+    Press Enter for no passphrase, or enter one for additional security.
+  </Step>
+
+  <Step title="Save seed phrase">
+    The output displays your seed phrase and public key:
+    
+    ```text
+    pubkey: 9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b
+    
+    Save this seed phrase and your BIP39 passphrase to recover your new keypair:
+    [24 word seed phrase displayed here]
+    ```
+    
+    **Write down the seed phrase on paper and store it securely.**
+  </Step>
+</Steps>
+
+### Increase Word Count
+
+For added security, use 24 words instead of the default 12:
+
+```bash
+solana-keygen new --no-outfile --word-count 24
+```
+
+### Derive Public Key from Seed
+
+Recover your public key from a seed phrase:
+
+```bash
+solana-keygen pubkey prompt://
+```
+
+You'll be prompted to enter your seed phrase (and passphrase if you set one):
+
+```text
+[recovery] seed phrase: [type your seed phrase]
+[recovery] BIP39 Passphrase (empty for none): [type passphrase or press Enter]
+```
+
+Output:
+```text
+9ZNTfG4NyQgxy2SWjSiQoUyBPEvXT2xo7fKc5hPYYJ7b
+```
+
+<Info>
+Your seed phrase is not displayed as you type for security reasons.
+</Info>
+
+### Verify Paper Wallet
+
+Verify you control a paper wallet:
+
+```bash
+solana-keygen verify <PUBKEY> prompt://
+```
+
+Enter your seed phrase when prompted. Output on success:
+```text
+Success
+```
+
+### Hierarchical Derivation
+
+Solana supports BIP32/BIP44 hierarchical derivation. By default, `prompt://` derives the path `m/44'/501'`.
+
+Derive a child key:
+
+```bash
+solana-keygen pubkey 'prompt://?key=0/1'
+```
+
+Use a custom derivation path:
+
+```bash
+solana-keygen pubkey 'prompt://?full-path=m/44/2017/0/1'
+```
+
+<Note>
+Solana uses Ed25519 keypairs, so per [SLIP-0010](https://github.com/satoshilabs/slips/blob/master/slip-0010.md), all derivation indexes are hardened regardless of whether ticks are included.
+</Note>
+
+### Using Paper Wallets
+
+Use the `prompt://` URI anywhere a keypair is required:
+
+```bash
+# Check balance
+solana balance prompt://
+
+# Transfer tokens
+solana transfer --from prompt:// <RECIPIENT> <AMOUNT>
+
+# Create stake account
+solana create-stake-account --from prompt:// stake-account.json <AMOUNT>
+```
+
+### Check Balance
+
+To check a paper wallet balance without exposing the seed phrase:
+
+1. Derive the public key on an air-gapped computer
+2. Transfer the public key via USB stick to a networked computer
+3. Check balance using the public key:
+
+```bash
+solana config set --url https://api.mainnet-beta.solana.com
+solana balance <PUBKEY>
+```
+
+### Paper Wallet Security
+
+- Extremely secure when used with offline signing
+- Inconvenient for frequent transactions
+- Protect seed phrase from physical theft
+- Consider using a fireproof safe
+- Never enter seed phrase on compromised computers
+- Use air-gapped systems for high-value operations
+
+## Hardware Wallets
+
+Hardware wallets provide excellent security while maintaining convenience.
+
+### Supported Devices
+
+Solana CLI supports:
+
+- **Ledger**: Nano S, Nano S Plus, Nano X
+- **Trezor**: Model T, Safe 3, Safe 5
+
+### Keypair URL Format
+
+Hardware wallets use a special URL format:
+
+```text
+usb://<MANUFACTURER>[/<WALLET_ID>][?key=<DERIVATION_PATH>]
+```
+
+- `MANUFACTURER` - Device type (`ledger` or `trezor`)
+- `WALLET_ID` - Globally unique identifier (optional)
+- `DERIVATION_PATH` - Key derivation path as `<ACCOUNT>[/<CHANGE>]` (optional)
+
+Examples:
+
+```bash
+usb://ledger
+usb://ledger?key=0
+usb://ledger?key=0/1
+usb://ledger/BsNsvfXqQTtJnagwFWdBS7FBXgnsK8VZ5CmuznN85swK?key=0/0
+```
+
+### Derivation Paths
+
+All Solana derivation paths implicitly include the prefix `44'/501'` per [BIP44 specifications](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki) where 501 is Solana's coin type.
+
+The full path for `usb://ledger?key=0/0` is:
+```text
+m/44'/501'/0'/0'
+```
+
+### Get Hardware Wallet Public Key
+
+```bash
+solana-keygen pubkey usb://ledger?key=0
+```
+
+The device will prompt you to confirm the operation.
+
+### Using Hardware Wallets
+
+Use the keypair URL anywhere a keypair is required:
+
+```bash
+# Check balance
+solana balance usb://ledger
+
+# Transfer tokens
+solana transfer --from usb://ledger <RECIPIENT> <AMOUNT>
+
+# Create stake account
+solana create-stake-account --from usb://ledger stake-account.json <AMOUNT>
+```
+
+Each operation requires physical confirmation on the device.
+
+### Multiple Accounts
+
+Derive multiple accounts from one device:
+
+```bash
+# Account 0
+solana-keygen pubkey usb://ledger?key=0
+
+# Account 1
+solana-keygen pubkey usb://ledger?key=1
+
+# Account 2
+solana-keygen pubkey usb://ledger?key=2
+```
+
+### Hardware Wallet Benefits
+
+- Private keys never leave the device
+- Physical confirmation required for transactions
+- Secure element chip protection
+- Balance between security and convenience
+- Suitable for significant token amounts
+- Resistant to malware attacks
+
+## Vanity Address Generation
+
+Generate keypairs with custom prefixes or suffixes using `solana-keygen grind`.
+
+### Generate Address with Prefix
+
+Create an address starting with "SOL":
+
+```bash
+solana-keygen grind --starts-with SOL:1
+```
+
+The `:1` specifies to find 1 match. Longer prefixes take exponentially more time.
+
+### Generate Address with Suffix
+
+Create an address ending with "SOL":
+
+```bash
+solana-keygen grind --ends-with SOL:1
+```
+
+### Multi-threaded Grinding
+
+Specify thread count for faster generation:
+
+```bash
+solana-keygen grind --starts-with ABC:1 --num-threads 8
+```
+
+### Save to File
+
+Save the generated keypair:
+
+```bash
+solana-keygen grind --starts-with SOL:1 --outfile ~/my-solana-wallet/vanity.json
+```
+
+<Warning>
+Vanity address generation can take significant time and computational resources. Each additional character increases difficulty exponentially.
+</Warning>
+
+## Best Practices
+
+### For Development
+
+- Use file system wallets on isolated development machines
+- Never reuse development keypairs on mainnet
+- Keep separate keypairs for different clusters
+
+### For Production
+
+- Use hardware wallets for validator identity and withdraw authority
+- Use paper wallets with offline signing for high-value operations
+- Never store mainnet keypairs in plaintext on networked systems
+- Implement multi-signature schemes for critical operations
+
+### For Validators
+
+- Use hardware wallet for withdraw authority
+- Use file system wallet for vote account (requires frequent signing)
+- Keep identity keypair secure and backed up
+- Consider using a TPU vote signer for improved performance
+
+### Backup Strategy
+
+1. **File System Wallets**: Copy keypair files to encrypted USB drives
+2. **Paper Wallets**: Write seed phrases on paper, store in multiple secure locations
+3. **Hardware Wallets**: Keep device safe, backup seed phrase on paper
+4. Test recovery procedures regularly
+
+## Common Operations
+
+### Set Default Keypair
+
+Configure the CLI to use a specific keypair by default:
+
+```bash
+solana config set --keypair ~/my-solana-wallet/my-keypair.json
+```
+
+Verify:
+```bash
+solana config get
+```
+
+Output:
+```text
+Keypair Path: /home/solana/my-solana-wallet/my-keypair.json
+```
+
+### Display Public Key
+
+From file:
+```bash
+solana-keygen pubkey ~/my-solana-wallet/my-keypair.json
+```
+
+From paper wallet:
+```bash
+solana-keygen pubkey prompt://
+```
+
+From hardware wallet:
+```bash
+solana-keygen pubkey usb://ledger?key=0
+```
+
+### Recover Keypair
+
+Recover a keypair from seed phrase to a file:
+
+```bash
+solana-keygen recover --outfile ~/recovered-keypair.json
+```
+
+You'll be prompted for your seed phrase and passphrase.
+
+<Warning>
+Only recover keypairs to files on secure, trusted systems.
+</Warning>
+
+## Troubleshooting
+
+### Cannot find hardware wallet
+
+Ensure:
+- Device is connected via USB
+- Device is unlocked
+- Solana app is open on the device
+- USB permissions are correct (Linux may require udev rules)
+
+### Seed phrase validation fails
+
+If using a seed phrase from another tool with a different word list:
+
+```bash
+solana-keygen pubkey prompt:// --skip-seed-phrase-validation
+```
+
+### Wrong public key derived
+
+Ensure you're using the correct:
+- Seed phrase (word order matters)
+- Passphrase (case-sensitive)
+- Derivation path
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Cluster Selection" icon="server" href="/cli/cluster-selection">
+    Connect to different Solana clusters
+  </Card>
+  
+  <Card title="Stake Accounts" icon="coins" href="/cli/stake-accounts">
+    Create and manage stake accounts
+  </Card>
+</CardGroup>

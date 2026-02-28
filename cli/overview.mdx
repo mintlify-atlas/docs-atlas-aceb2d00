@@ -1,0 +1,262 @@
+---
+title: Solana CLI Tools Overview
+description: Introduction to the Solana command-line interface tools for managing wallets, stake accounts, vote accounts, and interacting with the Solana blockchain.
+---
+
+## Introduction
+
+The Solana Command Line Interface (CLI) is a comprehensive suite of tools for interacting with the Solana blockchain. It provides validators, developers, and users with powerful commands to manage accounts, deploy programs, stake tokens, and configure validator operations.
+
+Before running any Solana CLI commands, the tools must be installed on your system. See the [Installation](/cli/installation) guide for detailed instructions.
+
+## Main CLI Tools
+
+The Solana CLI suite consists of several command-line tools, each serving specific purposes:
+
+### solana
+
+The main command-line tool for interacting with Solana clusters. It provides commands for:
+
+- Account management and balance checking
+- Token transfers
+- Stake account operations
+- Vote account management
+- Cluster queries and network information
+- Program deployment and interaction
+
+### solana-keygen
+
+A key generation and management tool for creating and managing Solana keypairs:
+
+- Generate new keypairs with various security options
+- Derive public keys from seed phrases
+- Verify keypair ownership
+- Support for BIP39/BIP44 hierarchical derivation
+- Grind vanity addresses
+
+### solana-validator
+
+The validator node software for running a Solana validator.
+
+### Command Structure
+
+All Solana CLI commands follow a consistent structure:
+
+```bash
+solana <COMMAND> [OPTIONS] [ARGS]
+```
+
+## Getting Help
+
+View all available commands:
+
+```bash
+solana --help
+```
+
+Get detailed help for a specific command:
+
+```bash
+solana <COMMAND> --help
+```
+
+For example:
+
+```bash
+solana balance --help
+solana create-stake-account --help
+```
+
+## Common Command Patterns
+
+### Placeholder Conventions
+
+Command documentation uses placeholders to indicate where you should provide specific values:
+
+- `<AMOUNT>` - A numeric value (e.g., `42` or `100.42`)
+- `<ACCOUNT_ADDRESS>` - A base58-encoded public key (e.g., `9grmKMwTiZwUHSExjtbFzHLPTdWoXgcg1bZkhvwTrTww`)
+- `<KEYPAIR>` - A keypair file path, hardware wallet URL, or prompt URI
+- `<PUBKEY>` - A public key address
+
+### Global Options
+
+Several options are available across all commands:
+
+```bash
+-C, --config <FILEPATH>        # Configuration file to use
+-u, --url <URL_OR_MONIKER>     # RPC URL or moniker (mainnet-beta, testnet, devnet, localhost)
+-k, --keypair <KEYPAIR>        # Filepath or URL to a keypair
+--commitment <LEVEL>           # Commitment level (processed, confirmed, finalized)
+-v, --verbose                  # Show additional information
+--output <FORMAT>              # Output format (json, json-compact)
+```
+
+## Essential Commands
+
+### Configuration Management
+
+View current configuration:
+
+```bash
+solana config get
+```
+
+Set RPC URL:
+
+```bash
+solana config set --url https://api.devnet.solana.com
+```
+
+### Account Information
+
+Check balance:
+
+```bash
+solana balance <ACCOUNT_ADDRESS>
+```
+
+View account details:
+
+```bash
+solana account <ACCOUNT_ADDRESS>
+```
+
+### Cluster Information
+
+Check CLI version:
+
+```bash
+solana --version
+```
+
+Check cluster version:
+
+```bash
+solana cluster-version
+```
+
+View cluster nodes:
+
+```bash
+solana cluster-nodes
+```
+
+## Keypair Conventions
+
+Many commands require a `<KEYPAIR>` argument. The value depends on your wallet type:
+
+### File System Wallet
+
+Provide the path to the keypair JSON file:
+
+```bash
+solana-keygen pubkey /home/solana/my_wallet.json
+```
+
+### Paper Wallet
+
+Use the `prompt://` URI scheme to enter your seed phrase:
+
+```bash
+solana-keygen pubkey prompt://
+```
+
+### Hardware Wallet
+
+Use a keypair URL specifying the device:
+
+```bash
+solana-keygen pubkey usb://ledger?key=0
+```
+
+## Installation Verification
+
+<Steps>
+  <Step title="Check Solana version">
+    Verify the CLI is installed correctly:
+    
+    ```bash
+    solana --version
+    ```
+    
+    Expected output:
+    ```text
+    solana-cli 2.0.0 (src:00000000; feat:123456789, client:Agave)
+    ```
+  </Step>
+
+  <Step title="Check keygen tool">
+    Verify solana-keygen is available:
+    
+    ```bash
+    solana-keygen --version
+    ```
+  </Step>
+
+  <Step title="Set initial configuration">
+    Configure the CLI to connect to a cluster:
+    
+    ```bash
+    solana config set --url https://api.devnet.solana.com
+    ```
+  </Step>
+
+  <Step title="Verify connectivity">
+    Test cluster connection:
+    
+    ```bash
+    solana cluster-version
+    ```
+    
+    This should return the cluster's current version number.
+  </Step>
+</Steps>
+
+## Configuration File
+
+The Solana CLI stores configuration in `~/.config/solana/cli/config.yml` by default. This file contains:
+
+- `json_rpc_url` - The cluster RPC endpoint
+- `websocket_url` - WebSocket endpoint for subscriptions
+- `keypair_path` - Default keypair file location
+- `commitment` - Default commitment level
+
+You can specify an alternate configuration file using:
+
+```bash
+solana -C /path/to/config.yml <COMMAND>
+```
+
+## Output Formats
+
+By default, commands output human-readable text. For programmatic use, request JSON output:
+
+```bash
+solana balance <ADDRESS> --output json
+```
+
+Compact JSON format:
+
+```bash
+solana balance <ADDRESS> --output json-compact
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/cli/installation">
+    Install the Solana CLI tools on your system
+  </Card>
+  
+  <Card title="Wallet Management" icon="wallet" href="/cli/wallet-management">
+    Create and manage wallets with solana-keygen
+  </Card>
+  
+  <Card title="Cluster Selection" icon="server" href="/cli/cluster-selection">
+    Connect to different Solana clusters
+  </Card>
+  
+  <Card title="Stake Accounts" icon="coins" href="/cli/stake-accounts">
+    Manage stake accounts and delegate tokens
+  </Card>
+</CardGroup>

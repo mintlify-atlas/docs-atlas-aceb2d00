@@ -1,0 +1,372 @@
+---
+title: Operations
+description: Day-to-day validator operations including starting, stopping, updating software, and managing stake and vote accounts.
+---
+
+After you have successfully setup and started a validator, you will want to become familiar with how to operate your validator on a day-to-day basis. During daily operations, you will be monitoring your server, updating software regularly (both the Solana validator software and operating system packages), and managing your vote account and identity account.
+
+All of these skills are critical to practice. Maximizing your validator uptime is an important part of being a good operator.
+
+## Starting and Stopping Your Validator
+
+### Restarting Your Validator
+
+There are many operational reasons you may want to restart your validator. As a best practice, you should avoid a restart during a leader slot. A leader slot is the time when your validator is expected to produce blocks.
+
+<Warning>
+For the health of the cluster and also for your validator's ability to earn transaction fee rewards, you do not want your validator to be offline during an opportunity to produce blocks.
+</Warning>
+
+To see the full leader schedule for an epoch:
+
+```bash
+solana leader-schedule
+```
+
+Based on the current slot and the leader schedule, you can calculate open time windows where your validator is not expected to produce blocks.
+
+### Using agave-validator exit
+
+Assuming you are ready to restart, you may use the `agave-validator exit` command. The command exits your validator process when an appropriate idle time window is reached.
+
+```bash
+agave-validator exit --help
+```
+
+<Tip>
+Assuming that you have systemd implemented for your validator process, the validator should restart automatically after the exit.
+</Tip>
+
+### Systemd Service Management
+
+If you're running your validator as a systemd service, you can use standard systemd commands:
+
+```bash
+# Start the validator
+sudo systemctl start sol
+
+# Stop the validator
+sudo systemctl stop sol
+
+# Restart the validator
+sudo systemctl restart sol
+
+# Check status
+sudo systemctl status sol
+
+# View logs
+journalctl -u sol -f
+```
+
+## Updating Validator Software
+
+There are many ways to upgrade the Solana CLI software. As an operator, you will need to upgrade often, so it is important to get comfortable with this process.
+
+<Note>
+Validator nodes do not need to be offline while the newest version is being built from source. All methods below can be done before the validator process is restarted.
+</Note>
+
+### Building From Source
+
+The easiest way to upgrade the Solana CLI software is to build the newest version from source. See the build from source instructions for details.
+
+### Restart to Apply Update
+
+The validator process will need to be restarted before the newly installed version is in use. Use `agave-validator exit` to restart your validator process:
+
+```bash
+agave-validator exit --max-delinquent-stake 40 --skip-new-snapshot-check
+```
+
+### Verifying Version
+
+The best way to verify that your validator process has changed to the desired version is to grep the logs after a restart:
+
+```bash
+grep -B1 'Starting validator with' <path/to/logfile>
+```
+
+You can also check the version of the installed binary:
+
+```bash
+agave-validator --version
+```
+
+## Managing Snapshots
+
+Validators operators who have not experienced significant downtime (multiple hours of downtime), should avoid downloading snapshots. It is important for the health of the cluster as well as your validator history to maintain the local ledger.
+
+<Warning>
+Downloading a snapshot should only be reserved for occasions when you do not have local state. Prolonged downtime or the first install of a new validator are examples of times when you may not have state locally.
+</Warning>
+
+### Avoiding Snapshot Downloads
+
+To avoid downloading a snapshot on restart, add the following flag to the `agave-validator` command:
+
+```bash
+--no-snapshot-fetch
+```
+
+If you use this flag, make sure to run `solana catchup <pubkey>` after your validator starts to make sure that the validator is catching up in a reasonable time.
+
+### Downloading Snapshots
+
+If you are starting a validator for the first time, or your validator has fallen too far behind after a restart, then you may have to download a snapshot.
+
+To download a snapshot, you must **NOT** use the `--no-snapshot-fetch` flag. Without the flag, your validator will automatically download a snapshot from your known validators that you specified with the `--known-validator` flag.
+
+If one of the known validators is downloading slowly, you can try adding the `--minimal-snapshot-download-speed` flag to your validator. This flag will switch to another known validator if the initial download speed is below the threshold that you set.
+
+## Managing Vote Accounts
+
+### Checking Vote Account Status
+
+The `solana vote-account` command displays the recent voting activity from your validator:
+
+```bash
+solana vote-account ~/vote-account-keypair.json
+```
+
+### Updating Commission
+
+Commission can be changed with the `vote-update-commission` command:
+
+```bash
+solana vote-update-commission <VOTE_ACCOUNT_ADDRESS> <COMMISSION> \
+    --authorized-withdrawer <WITHDRAWER_KEYPAIR>
+```
+
+<Warning>
+Validators can only update their commission during the first half of any epoch. This prevents validators from stealing delegator rewards by setting a low commission, increasing it right before the end of the epoch, and then changing it back after reward distribution.
+</Warning>
+
+### Withdrawing From Vote Account
+
+<Warning>
+Your withdrawer's keypair should **NEVER** be stored on your server. It should be stored on a hardware wallet, paper wallet, or multisig to mitigate the risk of hacking and theft of funds.
+</Warning>
+
+To withdraw your funds from your vote account, run `solana withdraw-from-vote-account` on a trusted computer:
+
+```bash
+solana withdraw-from-vote-account \
+   vote-account-keypair.json \
+   person-keypair.json ALL \
+   --authorized-withdrawer authorized-withdrawer-keypair.json
+```
+
+This example withdraws all funds from your vote account (excluding the rent exempt minimum).
+
+### Changing Vote Account Authorities
+
+#### Update Validator Identity
+
+You will need access to the authorized withdrawer keypair:
+
+```bash
+# Create new validator identity
+solana-keygen new -o ~/new-validator-keypair.json
+
+# Fund the new identity account
+solana transfer ~/new-validator-keypair.json 500
+
+# Update the vote account
+solana vote-update-validator ~/vote-account-keypair.json \
+    ~/new-validator-keypair.json ~/authorized_withdrawer.json
+
+# Restart validator with new identity
+```
+
+#### Update Vote Authority
+
+The vote authority keypair may only be changed at epoch boundaries:
+
+```bash
+# Check remaining time in epoch
+solana epoch-info
+
+# Create new vote authority
+solana-keygen new -o ~/new-vote-authority.json
+
+# Authorize new voter
+solana vote-authorize-voter-checked ~/vote-account-keypair.json \
+    ~/validator-keypair.json ~/new-vote-authority.json
+
+# Restart validator with both old and new authorities
+agave-validator \
+    --authorized-voter ~/validator-keypair.json \
+    --authorized-voter ~/new-vote-authority.json \
+    ...
+```
+
+#### Update Authorized Withdrawer
+
+No special handling or timing considerations are required:
+
+```bash
+solana vote-authorize-withdrawer-checked <VOTE_ACCOUNT_ADDRESS> \
+    <OLD_WITHDRAWER_KEYPAIR> <NEW_WITHDRAWER_PUBKEY>
+```
+
+## Managing Stake
+
+### Checking Stake Status
+
+View your stake account details:
+
+```bash
+solana stake-account ~/validator-stake-keypair.json
+```
+
+View your validator's active stake:
+
+```bash
+solana validators | grep <pubkey>
+```
+
+View stake history:
+
+```bash
+solana stake-history
+```
+
+### Delegating Stake
+
+Create a stake account:
+
+```bash
+solana create-stake-account ~/validator-stake-keypair.json 1
+```
+
+Delegate stake to your validator:
+
+```bash
+solana delegate-stake ~/validator-stake-keypair.json ~/vote-account-keypair.json
+```
+
+<Warning>
+Don't delegate your remaining SOL, as your validator will use those tokens to vote.
+</Warning>
+
+### Deactivating Stake
+
+Before detaching your validator from the cluster, you should deactivate the stake:
+
+```bash
+solana deactivate-stake ~/validator-stake-keypair.json
+```
+
+<Note>
+Stake is not deactivated immediately and instead cools down in a similar fashion as stake warm up. Your validator should remain attached to the cluster while the stake is cooling down. Cooldown may take several epochs to complete.
+</Note>
+
+After deactivation, use the `withdraw-stake` command to recover the previously staked lamports.
+
+## Managing Account Balances
+
+### Check Identity Account Balance
+
+It is important that you do not accidentally run out of funds in your identity account, as your node will stop voting.
+
+```bash
+solana balance validator-keypair.json
+```
+
+Or for more detail:
+
+```bash
+solana balance --lamports validator-keypair.json
+```
+
+<Tip>
+`agave-watchtower` can monitor for a minimum validator identity balance. See the monitoring documentation for details.
+</Tip>
+
+### Funding Your Identity Account
+
+Regularly check and refill your identity account as needed:
+
+```bash
+solana transfer <VALIDATOR_IDENTITY_PUBKEY> 10
+```
+
+<Note>
+How much SOL you should store in your identity account is up to you. As a best practice, make sure to check the account regularly and refill or deduct from it as needed.
+</Note>
+
+## System Maintenance
+
+### Keep System Updated
+
+Make sure to regularly update packages in your Ubuntu system:
+
+```bash
+sudo apt update
+sudo apt upgrade
+```
+
+<Tip>
+Out of date packages may contain known security vulnerabilities. A good practice would be to update weekly at least.
+</Tip>
+
+### Monitor Disk Usage
+
+Regularly check disk usage to prevent running out of space:
+
+```bash
+df -h
+```
+
+Check ledger directory size:
+
+```bash
+du -sh /mnt/ledger
+du -sh /mnt/accounts
+```
+
+### Log Management
+
+Your log files can grow very large. Make sure you have log rotation configured. If you followed the setup guide, logrotate should already be configured.
+
+Manually rotate logs if needed:
+
+```bash
+sudo logrotate -f /etc/logrotate.d/sol
+```
+
+## Community Resources
+
+### Educational Workshops
+
+The Solana validator community holds regular educational workshops. Watch past workshops through the [Solana validator educational workshops playlist](https://www.youtube.com/watch?v=86zySQ5vGW8&list=PLilwLeBwGuK6jKrmn7KOkxRxS9tvbRa5p).
+
+### Community Validator Calls
+
+#### Solana Foundation Validator Discussion
+
+- **Schedule:** Every second Thursday of the month 18:00 CET
+- **Recorded:** Yes, available on the [Community Validator Discussions playlist](https://www.youtube.com/playlist?list=PLilwLeBwGuK78yjGBZwYhTf7rao0t13Zw)
+
+#### Community Led Validator Call
+
+- **Schedule:** Every fourth Thursday of the month 18:00 CET
+- **Recorded:** No
+- **Agenda:** See [HackMD site](https://hackmd.io/1DFauFMWTZG37-U7CXhxMg?view#Solana-Community-Validator-Call-Agendas)
+
+<Note>
+For the most up-to-date information, check the validator-announcements channel in Discord.
+</Note>
+
+## Getting Help
+
+For help with validator command line options:
+
+```bash
+agave-validator --help
+```
+
+Join the validator community:
+- Discord: `#validator-support` channel at [https://solana.com/discord](https://solana.com/discord)
+- [Network Explorer](http://explorer.solana.com/)
+- [Core software repo](https://github.com/solana-labs/solana)

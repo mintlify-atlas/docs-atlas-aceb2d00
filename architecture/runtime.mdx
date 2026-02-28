@@ -1,0 +1,333 @@
+---
+title: Runtime
+description: Sealevel parallel runtime, program execution, and the Solana Virtual Machine in Agave
+---
+
+The Agave runtime, known as **Sealevel**, is a parallel transaction execution engine that powers Solana's high throughput. Unlike sequential VMs, Sealevel can execute thousands of transactions in parallel by analyzing account dependencies upfront.
+
+## Overview
+
+The runtime is responsible for:
+
+- Executing smart contract programs (Solana programs)
+- Managing account state and balances
+- Enforcing access control and security rules
+- Parallelizing non-conflicting transactions
+- Recording execution in Proof of History
+
+Source: `docs/src/validator/runtime.md:1`
+
+## Core Design Principles
+
+### Explicit Dependencies
+
+Transactions must declare all accounts they will access upfront:
+
+```rust
+pub struct Transaction {
+    pub signatures: Vec<Signature>,
+    pub message: Message,
+}
+
+pub struct Message {
+    pub account_keys: Vec<Pubkey>,  // All accounts accessed
+    pub instructions: Vec<CompiledInstruction>,
+    // ...
+}
+```
+
+This enables the runtime to:
+- Detect conflicts before execution
+- Schedule non-conflicting transactions in parallel
+- Prevent dynamic memory allocation during execution
+
+Source: `docs/src/validator/runtime.md:8`
+
+### Parallel Execution
+
+Transactions are batched and analyzed for conflicts:
+
+1. **Load accounts** - Fetch account data from AccountsDB
+2. **Detect conflicts** - Identify transactions accessing the same writable accounts
+3. **Execute in parallel** - Run non-conflicting transactions simultaneously
+4. **Commit atomically** - All instructions in a transaction succeed or all fail
+
+Source: `docs/src/validator/runtime.md:20`
+
+<Info>
+At the execute stage, loaded accounts have no data dependencies, so all programs can be executed in parallel across available CPU cores.
+</Info>
+
+## Account Model
+
+Solana uses an account-based model where each account contains:
+
+```rust
+pub struct Account {
+    pub lamports: u64,          // Balance in lamports (1 SOL = 1B lamports)
+    pub data: Vec<u8>,          // Program-specific state
+    pub owner: Pubkey,          // Program that owns this account
+    pub executable: bool,       // Whether this account contains executable code
+    pub rent_epoch: Epoch,      // Next epoch to collect rent
+}
+```
+
+Source: `docs/src/validator/runtime.md:12`
+
+### Account Ownership Rules
+
+1. **Only the owner program may modify account data**
+   - Prevents unauthorized state changes
+   - Data is zero-initialized on assignment
+
+2. **Only the owner can spend lamports**
+   - Programs can only debit accounts they own
+   - Anyone can credit (send to) any account
+
+3. **Accounts assigned to a program cannot be reassigned**
+   - Once owned, always owned by that program
+
+Source: `docs/src/validator/runtime.md:30`
+
+## Transaction Execution
+
+### Execution Pipeline
+
+Transactions flow through the runtime in stages:
+
+```
+Loaded Accounts → Execute Programs → Check Invariants → Commit State
+```
+
+1. **Load** - Fetch all accounts into memory
+2. **Execute** - Run each instruction in sequence
+3. **Verify** - Check balance invariants and rules
+4. **Commit** - Write changes back to AccountsDB
+
+Source: `docs/src/validator/runtime.md:16`
+
+### Runtime Invariants
+
+The runtime enforces critical safety rules:
+
+1. **Balance conservation** - Total lamports before = total after
+2. **Read-only accounts unchanged** - Balances remain identical
+3. **Atomic execution** - All instructions succeed or all fail
+4. **Owner exclusivity** - Only owners modify account data
+
+Source: `docs/src/validator/runtime.md:30`
+
+<Note>
+These invariants are checked after execution. If any invariant is violated, the entire transaction is rolled back and marked as failed.
+</Note>
+
+## Program Execution
+
+Programs are executed through a well-defined entrypoint:
+
+```rust
+pub type Entrypoint = unsafe extern "C" fn(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
+) -> ProgramResult;
+```
+
+Source: `program-runtime/src/invoke_context.rs:1`
+
+### Instruction Processing
+
+Each instruction in a transaction:
+
+1. **Loads accounts** - Maps public keys to account data
+2. **Invokes program** - Calls the program's entrypoint
+3. **Returns result** - Success or error
+4. **Commits changes** - Updates account state on success
+
+Source: `docs/src/validator/runtime.md:37`
+
+### Cross-Program Invocation (CPI)
+
+Programs can call other programs using CPI:
+
+```rust
+invoke(
+    &instruction,           // Instruction to execute
+    &account_infos,        // Accounts to pass
+)?;
+```
+
+CPI enables:
+- Program composability
+- Modular smart contract design
+- Shared program logic
+- Secure delegation of authority
+
+Source: `program-runtime/src/cpi.rs:1`
+
+<Tip>
+CPI is limited to 4 levels deep to prevent infinite recursion and manage stack usage.
+</Tip>
+
+## Solana Virtual Machine (SVM)
+
+Programs execute in the **Solana Virtual Machine**, which provides:
+
+### eBPF Runtime
+
+Solana programs compile to eBPF bytecode:
+- **Deterministic** - Same input always produces same output
+- **Fast** - JIT compilation for near-native performance
+- **Safe** - Sandboxed execution prevents system access
+- **Verifiable** - Bytecode is verified before deployment
+
+Source: `program-runtime/src/vm.rs:1`
+
+### Compute Budget
+
+Each transaction has a compute budget:
+
+```rust
+pub struct ComputeBudget {
+    pub max_units: u64,           // Maximum compute units
+    pub heap_size: usize,         // Heap size in bytes
+    pub log_units: u64,           // Logging budget
+    pub log_64_units: u64,        // Data logging budget
+}
+```
+
+Default limits:
+- 200,000 compute units per instruction
+- 1,400,000 compute units per transaction
+- 32 KB heap per program invocation
+
+Source: `program-runtime/src/execution_budget.rs:1`
+
+### Syscalls
+
+Programs interact with the runtime through syscalls:
+
+- `sol_log_*` - Logging for debugging
+- `sol_invoke_signed` - Cross-program invocation
+- `sol_create_program_address` - PDA derivation
+- `sol_get_clock_sysvar` - Access cluster time
+- `sol_keccak256` - Cryptographic hashing
+
+Source: `syscalls/src/lib.rs:1`
+
+## Banking Stage Integration
+
+The Banking Stage coordinates runtime execution:
+
+```rust
+pub struct BankingStage {
+    // Transaction scheduling
+    scheduler: TransactionScheduler,
+    // Parallel execution
+    workers: Vec<Worker>,
+    // Result collection
+    recorder: TransactionRecorder,
+}
+```
+
+The scheduler:
+1. **Receives transactions** - From SigVerify stage
+2. **Locks accounts** - Reserves accounts for execution
+3. **Schedules execution** - Assigns to worker threads
+4. **Records in PoH** - Timestamps executed transactions
+5. **Returns results** - Success or failure per transaction
+
+Source: `core/src/banking_stage.rs:1`
+
+## Unified Scheduler
+
+Agave's default scheduler uses advanced parallelism:
+
+- **Multi-threaded execution** - Distributes work across cores
+- **Account locking** - Prevents conflicting access
+- **Priority queue** - Processes high-fee transactions first
+- **Look-ahead scheduling** - Finds parallelizable transactions
+
+Source: `unified-scheduler-pool/src/lib.rs:1`
+
+<Info>
+The Unified Scheduler can execute 50,000+ TPS on modern hardware by maximizing parallel execution.
+</Info>
+
+## Sysvar Accounts
+
+Special read-only accounts provide cluster state:
+
+- **Clock** - Current slot, epoch, and timestamp
+- **EpochSchedule** - Slots per epoch configuration
+- **Rent** - Rent calculation parameters
+- **StakeHistory** - Historical stake activations
+- **SlotHashes** - Recent slot hashes for verification
+
+Programs access sysvars without transaction overhead.
+
+Source: `runtime/src/sysvar_cache.rs:1`
+
+## Program Loading and Caching
+
+Programs are loaded and cached for performance:
+
+```rust
+pub struct LoadedPrograms {
+    entries: HashMap<Pubkey, Arc<LoadedProgram>>,
+}
+
+pub struct LoadedProgram {
+    pub program: Arc<ProgramRuntimeEnvironment>,
+    pub account_size: usize,
+    pub deployment_slot: Slot,
+    pub effective_slot: Slot,
+}
+```
+
+Caching strategy:
+- Programs are compiled once and reused
+- Cache is updated when programs are upgraded
+- LRU eviction prevents unbounded growth
+
+Source: `program-runtime/src/loaded_programs.rs:1`
+
+## Transaction Fees
+
+The runtime calculates and deducts fees:
+
+1. **Base fee** - Minimum fee per signature
+2. **Compute fee** - Based on compute units consumed
+3. **Prioritization fee** - Optional fee for priority
+4. **Account creation** - Rent-exempt minimum for new accounts
+
+Fees are paid from the fee payer's account before execution begins.
+
+## State Commitment
+
+Successful transactions result in state changes:
+
+1. **AccountsDB update** - Modified accounts written to cache
+2. **Bank hash update** - Cryptographic hash of all accounts
+3. **PoH recording** - Transaction hash recorded in PoH stream
+4. **Status recorded** - Success/failure logged for RPC queries
+
+Source: `runtime/src/bank.rs:1`
+
+## Built-in Programs
+
+Agave includes native programs:
+
+- **System Program** - Account creation and transfers
+- **Stake Program** - Staking and delegation
+- **Vote Program** - Validator voting
+- **BPF Loader** - Deploys and upgrades programs
+- **Config Program** - Stores configuration data
+
+Source: `builtins/src/lib.rs:1`
+
+## Next Steps
+
+- Learn about [validator anatomy](./validator-anatomy)
+- Understand [consensus mechanisms](./consensus)
+- Explore [cluster operations](./clusters)

@@ -1,0 +1,404 @@
+---
+title: Install Solana CLI Tools
+description: Install the Solana command-line tools using various methods including the Agave installer, prebuilt binaries, building from source, or Homebrew.
+---
+
+## Installation Methods
+
+There are multiple ways to install the Solana CLI tools depending on your platform and preferred workflow:
+
+- [Use the Solana Install Tool](#use-the-solana-install-tool) (Recommended)
+- [Download Prebuilt Binaries](#download-prebuilt-binaries)
+- [Build from Source](#build-from-source)
+- [Use Homebrew](#use-homebrew)
+
+## Use the Solana Install Tool
+
+The Agave installer is the simplest method to install and maintain the Solana CLI tools.
+
+### MacOS & Linux
+
+<Steps>
+  <Step title="Open Terminal">
+    Open your favorite terminal application.
+  </Step>
+
+  <Step title="Run the installer">
+    Install the latest Agave release:
+    
+    ```bash
+    sh -c "$(curl -sSfL https://release.anza.xyz/LATEST_AGAVE_RELEASE_VERSION/install)"
+    ```
+    
+    Replace `LATEST_AGAVE_RELEASE_VERSION` with a specific release tag, or use one of the symbolic channel names:
+    - `stable` - Latest stable release
+    - `beta` - Beta release channel
+    - `edge` - Edge/development releases
+    
+    Example:
+    ```bash
+    sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+    ```
+  </Step>
+
+  <Step title="Verify installation">
+    A successful installation displays:
+    
+    ```text
+    downloading LATEST_AGAVE_RELEASE_VERSION installer
+    Configuration: /home/solana/.config/solana/install/config.yml
+    Active release directory: /home/solana/.local/share/solana/install/active_release
+    * Release version: LATEST_AGAVE_RELEASE_VERSION
+    * Release URL: https://github.com/anza-xyz/agave/releases/download/LATEST_AGAVE_RELEASE_VERSION/solana-release-x86_64-unknown-linux-gnu.tar.bz2
+    Update successful
+    ```
+  </Step>
+
+  <Step title="Update PATH (if needed)">
+    If prompted to update your PATH environment variable:
+    
+    ```text
+    Please update your PATH environment variable to include the solana programs:
+    ```
+    
+    Copy and paste the recommended command shown by the installer.
+  </Step>
+
+  <Step title="Confirm version">
+    Verify the installation:
+    
+    ```bash
+    solana --version
+    ```
+    
+    Expected output:
+    ```text
+    solana-cli 2.0.0 (src:00000000; feat:123456789, client:Agave)
+    ```
+  </Step>
+</Steps>
+
+### Windows
+
+<Steps>
+  <Step title="Open Command Prompt as Administrator">
+    - Search for "Command Prompt" in the Windows search bar
+    - Right-click and select "Open as Administrator"
+    - Click "Yes" if prompted by User Account Control
+  </Step>
+
+  <Step title="Download the installer">
+    Run this command to download the Agave installer:
+    
+    ```bash
+    cmd /c "curl https://release.anza.xyz/LATEST_AGAVE_RELEASE_VERSION/agave-install-init-x86_64-pc-windows-msvc.exe --output C:\agave-install-tmp\agave-install-init.exe --create-dirs"
+    ```
+  </Step>
+
+  <Step title="Run the installer">
+    Execute the installer:
+    
+    ```bash
+    C:\agave-install-tmp\agave-install-init.exe LATEST_AGAVE_RELEASE_VERSION
+    ```
+    
+    Allow the program to run if prompted by security popups.
+  </Step>
+
+  <Step title="Close and reopen Command Prompt">
+    - Press Enter when the installer finishes
+    - Close the Administrator Command Prompt
+    - Open a new Command Prompt as a normal user
+  </Step>
+
+  <Step title="Verify installation">
+    Check the installed version:
+    
+    ```bash
+    solana --version
+    ```
+  </Step>
+</Steps>
+
+## Download Prebuilt Binaries
+
+If you prefer not to use `agave-install`, manually download and install the binaries.
+
+### Linux
+
+<Steps>
+  <Step title="Download the release">
+    Navigate to [Agave Releases](https://github.com/anza-xyz/agave/releases/latest) and download:
+    
+    ```text
+    solana-release-x86_64-unknown-linux-gnu.tar.bz2
+    ```
+  </Step>
+
+  <Step title="Extract and configure">
+    Extract the archive and add to PATH:
+    
+    ```bash
+    tar jxf solana-release-x86_64-unknown-linux-gnu.tar.bz2
+    cd solana-release/
+    export PATH=$PWD/bin:$PATH
+    ```
+  </Step>
+
+  <Step title="Verify installation">
+    ```bash
+    solana --version
+    ```
+  </Step>
+</Steps>
+
+### MacOS
+
+<Steps>
+  <Step title="Download the release">
+    Navigate to [Agave Releases](https://github.com/anza-xyz/agave/releases/latest) and download:
+    
+    ```text
+    solana-release-x86_64-apple-darwin.tar.bz2
+    ```
+  </Step>
+
+  <Step title="Extract and configure">
+    Extract the archive and add to PATH:
+    
+    ```bash
+    tar jxf solana-release-x86_64-apple-darwin.tar.bz2
+    cd solana-release/
+    export PATH=$PWD/bin:$PATH
+    ```
+  </Step>
+
+  <Step title="Verify installation">
+    ```bash
+    solana --version
+    ```
+  </Step>
+</Steps>
+
+### Windows
+
+<Steps>
+  <Step title="Download the release">
+    Navigate to [Agave Releases](https://github.com/anza-xyz/agave/releases/latest) and download:
+    
+    ```text
+    solana-release-x86_64-pc-windows-msvc.tar.bz2
+    ```
+  </Step>
+
+  <Step title="Extract the archive">
+    Use WinZip or a similar tool to extract the archive.
+  </Step>
+
+  <Step title="Set PATH">
+    Open Command Prompt, navigate to the extracted directory, and run:
+    
+    ```bash
+    cd solana-release/
+    set PATH=%cd%/bin;%PATH%
+    ```
+  </Step>
+
+  <Step title="Verify installation">
+    ```bash
+    solana --version
+    ```
+  </Step>
+</Steps>
+
+## Build from Source
+
+For advanced users who prefer to build from source or need custom configurations.
+
+### Prerequisites
+
+#### Rust
+
+Install Rust from [rust-lang.org](https://www.rust-lang.org/tools/install):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+#### Linux (Debian/Ubuntu)
+
+Install build dependencies:
+
+```bash
+apt-get install \
+    build-essential \
+    pkg-config \
+    libudev-dev llvm libclang-dev \
+    protobuf-compiler
+```
+
+#### Linux (Other Distributions)
+
+Use your distribution's package manager:
+
+<CodeGroup>
+```bash Fedora/RHEL
+sudo dnf install gcc pkg-config libudev-devel llvm clang protobuf-compiler
+```
+
+```bash Arch
+sudo pacman -S base-devel pkg-config systemd llvm clang protobuf
+```
+</CodeGroup>
+
+#### MacOS
+
+Install Homebrew from [brew.sh](https://brew.sh/), then:
+
+```bash
+brew install pkg-config libudev protobuf llvm coreutils
+```
+
+Follow any PATH configuration instructions shown after installation.
+
+#### Windows
+
+<Warning>
+Windows users may need to install [Windows Subsystem for Linux (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) to build from source. WSL provides a Linux environment within Windows.
+
+After installing WSL, run `wsl` from your Windows terminal and follow the Linux instructions above.
+</Warning>
+
+For native Windows builds:
+
+1. Install [Build Tools for Visual Studio](https://visualstudio.microsoft.com/downloads/) (2019 or later)
+   - Include C++ build tools in the installation
+2. Install [LLVM](https://releases.llvm.org/download.html)
+3. Install [Protocol Buffers](https://github.com/protocolbuffers/protobuf/releases) and add to PATH
+
+### Build and Install
+
+<Steps>
+  <Step title="Download source code">
+    Navigate to [Agave Releases](https://github.com/anza-xyz/agave/releases/latest) and download the Source Code archive.
+  </Step>
+
+  <Step title="Extract and build">
+    Extract the code and build:
+    
+    ```bash
+    tar -xzf agave-*.tar.gz
+    cd agave-*/
+    ./scripts/cargo-install-all.sh .
+    export PATH=$PWD/bin:$PATH
+    ```
+    
+    The build process may take several minutes depending on your system.
+  </Step>
+
+  <Step title="Verify installation">
+    ```bash
+    solana --version
+    ```
+  </Step>
+</Steps>
+
+## Use Homebrew
+
+For MacOS and Linux users who prefer Homebrew package management.
+
+<Note>
+Homebrew formulae are updated after each Solana release but may be outdated compared to the latest version.
+</Note>
+
+<Steps>
+  <Step title="Install via Homebrew">
+    ```bash
+    brew install solana
+    ```
+    
+    See the [Homebrew formula](https://formulae.brew.sh/formula/solana) for details.
+  </Step>
+
+  <Step title="Verify installation">
+    ```bash
+    solana --version
+    ```
+  </Step>
+</Steps>
+
+## Updating the CLI
+
+If you installed using `agave-install`, update to the latest version:
+
+```bash
+agave-install update
+```
+
+Update to a specific version:
+
+```bash
+agave-install update v2.0.0
+```
+
+Update to a specific channel:
+
+```bash
+agave-install update stable
+```
+
+## Post-Installation
+
+After installation, set up your CLI configuration:
+
+```bash
+# Set cluster endpoint
+solana config set --url https://api.devnet.solana.com
+
+# Verify configuration
+solana config get
+```
+
+Output:
+```text
+Config File: /home/solana/.config/solana/cli/config.yml
+RPC URL: https://api.devnet.solana.com
+WebSocket URL: wss://api.devnet.solana.com/ (computed)
+Keypair Path: /home/solana/.config/solana/id.json
+Commitment: confirmed
+```
+
+## Troubleshooting
+
+### Command not found
+
+If `solana` command is not found after installation, ensure the PATH is correctly set:
+
+```bash
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+```
+
+Add this line to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) to make it permanent.
+
+### Version mismatch
+
+Ensure your CLI version is compatible with the cluster you're connecting to:
+
+```bash
+solana --version
+solana cluster-version
+```
+
+The local CLI version should be greater than or equal to the cluster version.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="CLI Overview" icon="terminal" href="/cli/overview">
+    Learn about available CLI commands
+  </Card>
+  
+  <Card title="Wallet Management" icon="wallet" href="/cli/wallet-management">
+    Create and manage wallets with solana-keygen
+  </Card>
+</CardGroup>

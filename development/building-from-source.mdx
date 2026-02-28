@@ -1,0 +1,159 @@
+---
+title: Building from Source
+description: Complete guide to building Agave validator from source code, including prerequisites, dependencies, and build configurations
+---
+
+This guide covers building the Agave validator from source code. Building from source gives you access to the latest development features and allows you to customize your build configuration.
+
+## Prerequisites
+
+### Install Rust Toolchain
+
+Agave requires Rust, Cargo, and Rustfmt. Install them using rustup:
+
+```bash
+curl https://sh.rustup.rs -sSf | sh
+source $HOME/.cargo/env
+rustup component add rustfmt
+```
+
+The `rust-toolchain.toml` file in the repository pins a specific Rust version. Cargo will automatically install the correct version if it's not already installed.
+
+### System Dependencies
+
+#### Ubuntu/Debian
+
+On Ubuntu systems, install the required development libraries:
+
+```bash
+sudo apt-get update
+sudo apt-get install libssl-dev libudev-dev pkg-config zlib1g-dev llvm clang cmake make libprotobuf-dev protobuf-compiler libclang-dev
+```
+
+#### Fedora/RHEL
+
+On Fedora systems, install the required development libraries:
+
+```bash
+sudo dnf install openssl-devel systemd-devel pkg-config zlib-devel llvm clang cmake make protobuf-devel protobuf-compiler perl-core libclang-dev
+```
+
+## Download Source Code
+
+Clone the Agave repository from GitHub:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/anza-xyz/agave.git
+    cd agave
+    ```
+  </Step>
+
+  <Step title="Verify the repository">
+    Check that you're on the correct branch:
+    ```bash
+    git branch
+    git log --oneline -5
+    ```
+  </Step>
+</Steps>
+
+## Building
+
+### Debug Build
+
+For development and testing, build a debug version:
+
+```bash
+./cargo build
+```
+
+<Warning>
+  Debug builds are **not suitable** for running a testnet or mainnet validator. They include debugging symbols, lack optimizations, and run significantly slower than release builds.
+</Warning>
+
+### Release Build
+
+For production use on testnet or mainnet, you must build a release version:
+
+```bash
+./cargo build --release
+```
+
+Release builds:
+- Are fully optimized for performance
+- Strip debugging symbols
+- Are significantly faster than debug builds
+- Should be used for all production validators
+
+### Building Specific Components
+
+You can build individual components instead of the entire workspace:
+
+```bash
+# Build only the validator binary
+./cargo build --release --bin agave-validator
+
+# Build only the CLI
+./cargo build --release --bin agave
+
+# Build ledger tool
+./cargo build --release --bin agave-ledger-tool
+```
+
+## Build Output
+
+After building, binaries are located in:
+- Debug builds: `target/debug/`
+- Release builds: `target/release/`
+
+Key binaries include:
+- `agave-validator` - The validator client
+- `agave` - The CLI tool
+- `agave-ledger-tool` - Ledger inspection and management
+- `agave-test-validator` - Local test validator
+
+## Troubleshooting
+
+### Out of Memory
+
+If you encounter out-of-memory errors during compilation:
+
+```bash
+# Limit parallel jobs
+export CARGO_BUILD_JOBS=2
+./cargo build --release
+```
+
+### Linker Errors
+
+If you encounter linker errors, ensure all system dependencies are installed. On some systems, you may need to install additional packages:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install build-essential
+
+# Fedora/RHEL
+sudo dnf groupinstall "Development Tools"
+```
+
+### Rust Version Issues
+
+If you have Rust version conflicts:
+
+```bash
+# Update rustup
+rustup update
+
+# Let cargo use the pinned version
+cd agave
+rustup show  # Shows the version from rust-toolchain.toml
+```
+
+## Next Steps
+
+After building from source:
+- Run the [test suite](/development/testing) to verify your build
+- Review [contributing guidelines](/development/contributing) if you plan to contribute
+- See the [Operations guide](/validator/setup-guide) to run your validator

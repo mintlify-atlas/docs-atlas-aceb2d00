@@ -1,0 +1,404 @@
+---
+title: Monitoring
+description: Monitoring validator health, tracking key metrics, setting up alerting, and optimizing performance.
+---
+
+It is essential that you have monitoring in place on your validator. In the event that your validator is delinquent (behind the rest of the network) you want to respond immediately to fix the issue.
+
+## Agave Watchtower
+
+Agave Watchtower is an extremely useful monitoring tool that will regularly monitor the health of your validator. It can monitor your validator for delinquency then notify you on your application of choice: Slack, Discord, Telegram or Twilio. Additionally, `agave-watchtower` has the ability to monitor the health of the entire cluster so that you can be aware of any cluster wide problems.
+
+### Getting Started
+
+To get started with Agave Watchtower, run:
+
+```bash
+agave-watchtower --help
+```
+
+Here is a sample command that will monitor a validator node:
+
+```bash
+agave-watchtower --monitor-active-stake --validator-identity \
+  2uTk98rqqwENevkPH2AHHzGHXgeGc1h6ku8hQUqWeXZp
+```
+
+<Note>
+The command will monitor your validator, but you will not get notifications unless you added the environment variables mentioned in `agave-watchtower --help`.
+</Note>
+
+### Best Practices
+
+<Warning>
+It is a best practice to run the `agave-watchtower` command on a separate server from your validator.
+</Warning>
+
+In the case that you run `agave-watchtower` on the same computer as your `agave-validator` process, then during catastrophic events like a power outage, you will not be aware of the issue, because your `agave-watchtower` process will stop at the same time as your `agave-validator` process.
+
+Additionally, while running the `agave-watchtower` process manually with environment variables set in the terminal is a good way to test out the command, it is not operationally sound because the process will not be restarted when the terminal closes or during a system restart.
+
+<Tip>
+You could run your `agave-watchtower` command as a system process similar to `agave-validator`. In the system process file, you can specify the environment variables for your bot.
+</Tip>
+
+### Setup Telegram Notifications
+
+To send validator health notifications to your Telegram account:
+
+<Steps>
+
+### Create a Bot Using BotFather
+
+In Telegram, search for `@BotFather`. Send the following message to @BotFather: `/newbot`.
+
+Come up with a name for the bot. The only requirement is that it cannot have dashes or spaces, and it **must** end in the word `bot`. Many names have already been taken, so you may have to try a few.
+
+Once you find an available name, you will get a response from @BotFather that includes a link to chat with the bot as well as a token for the bot. Take note of the token.
+
+### Send a Message to The Bot
+
+Find the bot in Telegram and send it the following message: `/start`. Messaging the bot will help you later when looking for the bot chatroom id.
+
+### Create Telegram Group
+
+In Telegram, click on the new message icon and then select new group. Find your newly created bot and add the bot to the group. Next, name the group whatever you'd like.
+
+### Set Environment Variables
+
+Recall the HTTP API token from @BotFather. The token will have this format: `389178471:MMTKMrnZB4ErUzJmuFIXTKE6DupLSgoa7h4o`.
+
+Set the `TELEGRAM_BOT_TOKEN` environment variable:
+
+```bash
+export TELEGRAM_BOT_TOKEN=<HTTP API Token>
+```
+
+Next, you need the chat id for your group. First, send a message to your bot in the chat group that you created. Something like `@newvalidatorbot hello`.
+
+Next, in your browser, go to `https://api.telegram.org/bot<HTTP API Token>/getUpdates`. Make sure to replace `<HTTP API TOKEN>` with your API token. Also make sure that you include the word `bot` in the URL before the API token.
+
+The response should be in JSON. Search for the string `"chat":` in the JSON. The `id` value of that chat is your `TELEGRAM_CHAT_ID`. It will be a negative number like: `-781559558`. Remember to include the negative sign!
+
+<Tip>
+If you cannot find `"chat":` in the JSON, then you may have to remove the bot from your chat group and add it again.
+</Tip>
+
+Export the environment variable:
+
+```bash
+export TELEGRAM_CHAT_ID=<negative chat id number>
+```
+
+### Restart agave-watchtower
+
+Once your environment variables are set, restart `agave-watchtower`. You should see output about your validator.
+
+To test that your Telegram configuration is working properly, you could stop your validator briefly until it is labeled as delinquent. Up to a minute after the validator is delinquent, you should receive a message in the Telegram group from your bot. Start the validator again and verify that you get another message saying `all clear`.
+
+</Steps>
+
+## Key Metrics to Monitor
+
+### Check Gossip
+
+Confirm the IP address and identity pubkey of your validator is visible in the gossip network:
+
+```bash
+solana gossip
+```
+
+You can also check for your specific validator:
+
+```bash
+solana gossip | grep <VALIDATOR_PUBKEY>
+```
+
+### Check Balance
+
+Your account balance should decrease by the transaction fee amount as your validator submits votes, and increase after serving as the leader:
+
+```bash
+solana balance --lamports
+```
+
+<Warning>
+Regularly monitor your identity account balance to ensure you have enough SOL to continue voting. Running out of SOL will cause your validator to stop voting.
+</Warning>
+
+### Check Vote Activity
+
+The `solana vote-account` command displays the recent voting activity from your validator:
+
+```bash
+solana vote-account ~/vote-account-keypair.json
+```
+
+### Check Validator Status
+
+View all validators and find yours:
+
+```bash
+solana validators | grep <VALIDATOR_PUBKEY>
+```
+
+This shows:
+- Active stake
+- Vote credits earned
+- Commission
+- Last vote
+- Root slot
+- Skip rate
+
+### Monitor Catchup Status
+
+The `solana catchup` command is useful for seeing how quickly your validator is processing blocks:
+
+```bash
+solana catchup <VALIDATOR_PUBKEY>
+```
+
+If you see a message about trying to connect, your validator may not be part of the network yet. Check the logs and verify with `solana gossip` and `solana validators`.
+
+### Check Leader Schedule
+
+To see when your validator is scheduled to be leader:
+
+```bash
+solana leader-schedule | grep <VALIDATOR_PUBKEY>
+```
+
+This helps you plan maintenance windows to avoid being offline during your leader slots.
+
+## Using JSON-RPC Endpoints
+
+There are several useful JSON-RPC endpoints for monitoring your validator:
+
+### Get Cluster Nodes
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1, "method":"getClusterNodes"}' \
+  http://api.devnet.solana.com
+```
+
+You should see your validator in the list of cluster nodes.
+
+### Get Vote Accounts
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1, "method":"getVoteAccounts"}' \
+  http://api.devnet.solana.com
+```
+
+If your validator is properly voting, it should appear in the list of `current` vote accounts. If staked, `stake` should be greater than 0.
+
+### Get Leader Schedule
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1, "method":"getLeaderSchedule"}' \
+  http://api.devnet.solana.com
+```
+
+Returns the current leader schedule.
+
+### Get Epoch Info
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1, "method":"getEpochInfo"}' \
+  http://api.devnet.solana.com
+```
+
+Returns info about the current epoch. `slotIndex` should progress on subsequent calls.
+
+## Collecting Metrics
+
+It is important to collect metrics: it helps diagnose existing problems and allows you to anticipate future ones.
+
+### metrics.solana.com
+
+There are several public dashboards available, one of them is hosted at [metrics.solana.com](https://metrics.solana.com). Reporting to the solana.com public dashboard is even required if you participate in the Solana Foundation Delegation Program.
+
+Using it is done by simply setting the `$SOLANA_METRICS_CONFIG` variable in your validator's environment (e.g. at the beginning of your `validator.sh` script).
+
+Refer to the available Solana clusters documentation to get the appropriate value of `$SOLANA_METRICS_CONFIG` for your validator.
+
+### Prometheus and Grafana
+
+Many operators set up their own Prometheus and Grafana stack to collect and visualize metrics.
+
+The validator exposes metrics on port 8899 by default that can be scraped by Prometheus:
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: 'agave-validator'
+    static_configs:
+      - targets: ['localhost:8899']
+```
+
+## Log Analysis
+
+### Viewing Logs
+
+If running as a systemd service:
+
+```bash
+journalctl -u sol -f
+```
+
+If logging to a file:
+
+```bash
+tail -f /home/sol/agave-validator.log
+```
+
+### Log Output Tuning
+
+The messages that a validator emits to the log can be controlled by the `RUST_LOG` environment variable. Details can be found in the documentation for the `env_logger` Rust crate.
+
+<Warning>
+If logging output is reduced, this may make it difficult to debug issues encountered later. Should support be sought from the team, any changes will need to be reverted and the issue reproduced before help can be provided.
+</Warning>
+
+### Common Log Messages to Monitor
+
+#### Error Messages
+
+Grep for errors in your logs:
+
+```bash
+grep -i error /home/sol/agave-validator.log | tail -20
+```
+
+#### Leader Slot Messages
+
+Look for messages indicating your next leader slot:
+
+```bash
+grep "My next leader slot" /home/sol/agave-validator.log | tail -5
+```
+
+Example:
+```
+[2019-09-27T20:16:00.319721164Z INFO solana_core::replay_stage] <VALIDATOR_IDENTITY_PUBKEY> voted and reset PoH at tick height ####. My next leader slot is ####
+```
+
+#### Version Information
+
+Verify the validator version from logs:
+
+```bash
+grep -B1 'Starting validator with' /home/sol/agave-validator.log
+```
+
+## Performance Optimization
+
+### Monitor System Resources
+
+#### CPU Usage
+
+```bash
+top
+# or
+htop
+```
+
+Look for the `agave-validator` process and check CPU usage. It should be using multiple cores effectively.
+
+#### Memory Usage
+
+```bash
+free -h
+```
+
+Ensure you have sufficient free memory and are not swapping excessively.
+
+#### Disk I/O
+
+```bash
+iostat -x 1
+```
+
+Monitor disk utilization for your accounts and ledger drives. High `%util` or `await` times can indicate bottlenecks.
+
+#### Network Usage
+
+```bash
+iftop
+# or
+nload
+```
+
+Monitor network bandwidth to ensure you're not saturating your connection.
+
+### CPU Performance Tuning
+
+If PoH hashes/second rate is slower than the cluster target:
+
+Set performance governor:
+
+```bash
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+```
+
+Force minimum frequency to maximum:
+
+```bash
+# Example if your maximum GHz is 2.8
+echo 2850000 | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq
+```
+
+Check CPU clock speed:
+
+```bash
+lscpu | grep MHz
+```
+
+### System Clock
+
+Large system clock drift can prevent a node from properly participating in Solana's gossip protocol. Ensure that your system clock is accurate:
+
+```bash
+timedatectl
+```
+
+Operators commonly use an ntp server to maintain an accurate system clock.
+
+## Alerting Best Practices
+
+### Critical Alerts
+
+Set up alerts for:
+
+1. **Validator delinquency** - Most critical, indicates your validator has fallen behind
+2. **Low identity account balance** - Prevent running out of voting funds
+3. **High skip rate** - Indicates performance issues
+4. **Validator offline** - Process crashed or machine is down
+5. **Disk space low** - Prevent running out of space
+
+### Warning Alerts
+
+Set up warnings for:
+
+1. **Higher than normal skip rate**
+2. **Slower catchup speed**
+3. **High CPU or memory usage**
+4. **High disk I/O wait times**
+5. **Network bandwidth saturation**
+
+### Response Procedures
+
+Document your response procedures for common alerts:
+
+1. Validator delinquent - Check logs, verify network, restart if needed
+2. Low balance - Transfer SOL to identity account
+3. Out of disk space - Clean up old snapshots or ledger data
+4. High skip rate - Check system resources, network connection
+
+<Tip>
+Create a runbook with step-by-step procedures for responding to each type of alert. This helps ensure consistent and quick responses, especially if multiple people are on-call.
+</Tip>

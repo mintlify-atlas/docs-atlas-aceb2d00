@@ -1,0 +1,328 @@
+---
+title: Release Process
+description: Agave release process, including branch management, versioning, channels, and creating releases
+---
+
+This document describes how Agave releases are created and managed. Understanding the release process helps contributors know when their changes will be available and helps operators understand which version to run.
+
+## Branch Structure
+
+```
+========================= master branch (edge channel) ======================>
+         \                      \                     \
+          \___v0.7.0 tag         \                     \
+           \                      \         v0.9.0 tag__\
+            \          v0.8.0 tag__\                     \
+ v0.7.1 tag__\                      \                 v0.9 branch (beta channel)
+              \___v0.7.2 tag         \___v0.8.1 tag
+               \                      \
+                \                      \
+           v0.7 branch         v0.8 branch (stable channel)
+```
+
+### Master Branch
+
+All new development occurs on the **master** branch:
+
+- Receives all new features and improvements
+- Most unstable, cutting-edge code
+- Maps to the **edge** release channel
+- Minor version incremented after each stabilization branch is forged
+
+### Stabilization Branches
+
+**v*X.Y*** branches are stabilization branches:
+
+- Created from master approximately **every 13 weeks**
+- Receive only bug fixes (cherry-picked from master)
+- Named with major and minor version only (e.g., `v2.0`, `v2.1`)
+- The latest stabilization branch maps to **beta** channel
+- The second-latest maps to **stable** channel
+
+### Release Tags
+
+**v*X.Y.Z*** tags mark specific releases:
+
+- Created from stabilization branches
+- Trigger automated release builds and publishing to crates.io
+- Include full semantic version (e.g., `v2.0.3`)
+- Created as needed by the stabilization branch owner
+
+## Release Channels
+
+Channels help users automatically update to the appropriate version:
+
+| Channel | Branch | Stability | Use Case |
+|---------|--------|-----------|----------|
+| **edge** | master | Least stable | Development, testing new features |
+| **beta** | Latest v*X.Y* | More stable | Pre-production testing |
+| **stable** | Second v*X.Y* | Most stable | Production validators |
+
+<Warning>
+  **Do not** run beta releases on mainnet-beta or production validators. Only use stable releases for production.
+</Warning>
+
+## Creating a Release Branch
+
+### Prerequisites
+
+<Steps>
+  <Step title="Check for deprecated symbols">
+    For major releases, verify all deprecated symbols eligible for removal have been removed. The policy is to deprecate for at least one full minor version before removal.
+  </Step>
+
+  <Step title="Checkout master">
+    ```bash
+    git fetch --all
+    git checkout upstream/master
+    ```
+  </Step>
+
+  <Step title="Determine branch name">
+    The branch name is "v" + the first two version fields from `Cargo.toml`.
+    
+    Example: If `Cargo.toml` has `version = "2.1.0"`, the branch name is `v2.1`.
+  </Step>
+</Steps>
+
+### Create and Push Branch
+
+```bash
+# Create the new branch
+git checkout -b v2.1
+
+# Push to repository
+git push -u origin v2.1
+```
+
+Alternatively, use the GitHub UI to create the branch.
+
+### Update Master Version
+
+After creating the branch, increment the master version:
+
+<Steps>
+  <Step title="Increment version">
+    ```bash
+    scripts/increment-cargo-version.sh minor
+    ```
+    This updates all `Cargo.toml` files (e.g., 2.1.0 → 2.2.0).
+  </Step>
+
+  <Step title="Create PR">
+    ```bash
+    git co -b version_update
+    git ls-files -m | xargs git add
+    git commit -m 'Bump version to 2.2.0'
+    git push -u origin version_update
+    ```
+  </Step>
+
+  <Step title="Verify channels">
+    ```bash
+    ci/channel-info.sh
+    ```
+    Confirm your new branch shows as `BETA_CHANNEL` and the previous release as `STABLE_CHANNEL`.
+  </Step>
+</Steps>
+
+### Update Changelog
+
+Create a PR updating [CHANGELOG.md](https://github.com/anza-xyz/agave/blob/master/CHANGELOG.md) in master:
+
+- Advance channel links with the newly created branch becoming beta
+- Add a new `X.Y.0-Unreleased` section for the new master version
+- Remove `Unreleased` annotation from the section that became beta
+
+### Miscellaneous Cleanup
+
+<Steps>
+  <Step title="Pin stable dependencies">
+    On the newly promoted stable branch:
+    - Pin `splTokenCliVersion` in `scripts/spl-token-cli-version.sh`
+    - Pin `cargoBuildSbfVersion` and `cargoTestSbfVersion` in `scripts/cargo-build-sbf-version.sh`
+  </Step>
+
+  <Step title="Update new branch">
+    On the new branch:
+    - Remove channel links from CHANGELOG.md
+    - Remove "unreleased" wording
+    - Update CODEOWNERS to `* @anza-xyz/backport-reviewers`
+  </Step>
+
+  <Step title="Update tooling">
+    - Update mergify.yml with backport actions for new branch
+    - Add GitHub backport label for new branch
+    - Remove obsolete branch labels
+  </Step>
+
+  <Step title="Announce">
+    Announce on Discord #development that the release branch exists so people know to use the new backport labels.
+  </Step>
+</Steps>
+
+## Creating a Release
+
+### Create Release Tag
+
+<Steps>
+  <Step title="Open GitHub Releases">
+    Go to [GitHub Releases](https://github.com/anza-xyz/agave/releases) and click "Draft new release".
+  </Step>
+
+  <Step title="Set tag name">
+    The tag must exactly match the `version` field in `/Cargo.toml` prefixed by `v`.
+    
+    Example: If `Cargo.toml` has `version = "2.1.3"`, the tag is `v2.1.3`.
+  </Step>
+
+  <Step title="Set target branch">
+    Ensure the target branch matches your release branch.
+    
+    Example: For v2.1.0, target branch must be `v2.1`.
+  </Step>
+
+  <Step title="Write release notes">
+    - For the first release on a branch (e.g., v2.1.**0**), use [this template](https://raw.githubusercontent.com/anza-xyz/agave/master/.github/RELEASE_TEMPLATE.md)
+    - For patch releases, review commits since the previous release and add details
+  </Step>
+
+  <Step title="Save as draft">
+    Click "Save Draft" and verify:
+    - Release notes look correct
+    - Tag name is correct
+    - Target branch is correct
+    - "This is a pre-release" is checked
+  </Step>
+
+  <Step title="Ensure commits landed">
+    Verify all desired backports have been merged to the branch.
+  </Step>
+
+  <Step title="Publish">
+    Click "Publish release" (keep marked as pre-release).
+  </Step>
+</Steps>
+
+### Verify Release Automation
+
+After publishing, verify build artifacts:
+
+<Steps>
+  <Step title="Wait for builds">
+    Build artifacts take up to **60 minutes** to appear after creating the tag.
+  </Step>
+
+  <Step title="Check Buildkite">
+    The `agave-secondary` pipeline creates Linux and macOS artifacts:
+    - Visit [Buildkite agave-secondary](https://buildkite.com/anza-xyz/agave-secondary)
+    - Look for a job under your tag name
+  </Step>
+
+  <Step title="Check GitHub Actions">
+    Windows artifacts are built by GitHub Actions:
+    - Visit [GitHub Actions](https://github.com/anza-xyz/agave/actions)
+    - Look for a workflow under your tag name
+  </Step>
+
+  <Step title="Verify all assets">
+    Go to your release and verify all **15 assets** are present.
+  </Step>
+
+  <Step title="Uncheck pre-release">
+    Once all assets are present, edit the release and uncheck "This is a pre-release".
+  </Step>
+
+  <Step title="Check crates.io">
+    Verify [agave-validator on crates.io](https://crates.io/crates/agave-validator) has the updated version.
+    
+    This can take 2-3 hours. If it fails, retry the "publish crate" job in the Buildkite pipeline.
+  </Step>
+</Steps>
+
+### Post-Release Steps
+
+<Steps>
+  <Step title="Bump patch version">
+    An [automated action](https://github.com/anza-xyz/agave/blob/master/.github/workflows/increment-cargo-version-on-release.yml) creates a PR to increment the patch version on the release branch (e.g., 2.1.0 → 2.1.1).
+    
+    <Note>
+      As of 2024-03-26, this action may fail. If so, manually run the version bump script and revert any incorrect hashbrown and proc-macro2 version updates.
+    </Note>
+  </Step>
+
+  <Step title="Prepare next release">
+    Create a new draft release for `X.Y.Z+1` with:
+    - Empty release notes
+    - Same target branch
+    - Marked as "This is a pre-release"
+    
+    This allows incremental release note updates until the next release.
+  </Step>
+</Steps>
+
+## Version Numbering
+
+Agave follows [Semantic Versioning](https://semver.org/):
+
+- **Major** (X.0.0): Breaking changes, major features
+- **Minor** (X.Y.0): New features, backward-compatible
+- **Patch** (X.Y.Z): Bug fixes, backward-compatible
+
+### Prerelease Notation
+
+Agave supports semver prerelease notation in gossip:
+
+- **alpha**: 0.X.Y-alpha.Z
+- **beta**: 0.X.Y-beta.Z  
+- **rc**: 0.X.Y-rc.Z
+- **stable**: 0.X.Y
+
+Prerelease status is encoded in the top two bits of the minor field in the gossip `Version` struct.
+
+## Backporting Changes
+
+Bug fixes follow this workflow:
+
+<Steps>
+  <Step title="Merge to master first">
+    All bug fixes must land on master first to ensure they're present in future releases.
+  </Step>
+
+  <Step title="Let fix soak">
+    Allow the fix time on master to ensure stability.
+  </Step>
+
+  <Step title="Cherry-pick to branches">
+    Cherry-pick to stabilization branches as needed:
+    ```bash
+    git checkout v2.1
+    git cherry-pick <commit-hash>
+    git push
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The exception to merge-to-master-first is when a bug fix for v*X.Y* doesn't apply to master or v*X.Y-1*.
+</Note>
+
+## Deploying to Clusters
+
+After releasing:
+
+1. **testnet.solana.com** - Test the release here first
+2. **devnet.solana.com** - Deploy stable releases only
+3. **mainnet-beta.solana.com** - Deploy stable releases only
+
+<Warning>
+  **Never** deploy beta releases to devnet or mainnet-beta. Only stable releases that have been thoroughly tested on testnet should be deployed to production clusters.
+</Warning>
+
+See [cluster-ops documentation](https://github.com/solana-labs/cluster-ops/) for deployment procedures.
+
+## Next Steps
+
+- Review [contributing guidelines](/development/contributing) for code standards
+- Learn about [building from source](/development/building-from-source)
+- Understand [testing requirements](/development/testing)
