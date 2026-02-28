@@ -1,0 +1,118 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Agave",
+  "projectDescription": "A high-performance validator client for the Solana blockchain, maintained by Anza for web-scale decentralized applications.",
+  "theme": "aspen",
+  "primaryColor": "#14F195",
+  "lightColor": "#9945FF",
+  "darkColor": "#14F195",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "what-is-agave",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/validator-anatomy",
+              "architecture/consensus",
+              "architecture/runtime",
+              "architecture/clusters",
+              "architecture/proof-of-stake"
+            ]
+          },
+          {
+            "group": "Running a Validator",
+            "pages": [
+              "validator/validator-vs-rpc-node",
+              "validator/system-requirements",
+              "validator/setup-guide",
+              "validator/operations",
+              "validator/monitoring",
+              "validator/security",
+              "validator/troubleshooting"
+            ]
+          },
+          {
+            "group": "CLI Tools",
+            "pages": [
+              "cli/overview",
+              "cli/installation",
+              "cli/wallet-management",
+              "cli/cluster-selection",
+              "cli/stake-accounts",
+              "cli/vote-accounts"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/building-from-source",
+              "development/testing",
+              "development/contributing",
+              "development/release-process"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "RPC API",
+            "pages": [
+              "api/rpc-overview",
+              "api/http-methods",
+              "api/websocket-methods",
+              "api/deprecated-methods"
+            ]
+          },
+          {
+            "group": "Core Components",
+            "pages": [
+              "api/accounts-db",
+              "api/banking-stage",
+              "api/gossip",
+              "api/ledger",
+              "api/runtime"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "High-performance validator for Solana blockchain",
+    "Proof-of-Stake consensus mechanism",
+    "Tower BFT consensus algorithm",
+    "Gulf Stream transaction forwarding",
+    "Turbine block propagation",
+    "Sealevel parallel runtime",
+    "Comprehensive CLI tool suite",
+    "JSON-RPC and WebSocket APIs",
+    "Geyser plugin interface for data streaming"
+  ],
+  "publicApiSurface": [
+    "agave-validator - Main validator binary",
+    "solana - CLI tool for wallet and cluster management",
+    "solana-ledger-tool - Ledger inspection and management",
+    "solana-genesis - Genesis block creation",
+    "solana-keygen - Keypair generation",
+    "solana-test-validator - Local test validator",
+    "agave-install - Installation and update tool",
+    "JSON-RPC API - getAccountInfo, getBalance, getBlock, getBlockHeight",
+    "JSON-RPC API - getTransaction, sendTransaction, simulateTransaction",
+    "WebSocket API - accountSubscribe, logsSubscribe, signatureSubscribe",
+    "Geyser Plugin Interface - Account/transaction streaming"
+  ]
+}
